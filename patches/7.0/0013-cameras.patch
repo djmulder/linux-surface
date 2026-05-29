@@ -1061,9 +1061,9 @@ index f5456330b..3418ff475 100644
 -- 
 2.53.0
 
-From 96812b7d52c84c3e4d3d710d4faa6669dc28c609 Mon Sep 17 00:00:00 2001
+From 8a2cb982bb5f1fe027a800396d09f86c02d8b119 Mon Sep 17 00:00:00 2001
 From: "D.J. Mulder" <djmulder@example.com>
-Date: Fri, 29 May 2026 15:28:15 +0200
+Date: Fri, 29 May 2026 15:55:28 +0200
 Subject: [PATCH 1/5] media: i2c: Add Sony IMX681 sensor driver for Surface Pro
  10/11
 
@@ -1081,18 +1081,23 @@ Register sequences reverse-engineered from Windows I2C traces.
 Uses H-flip (reg 0x0101=0x01) to convert native RGGB Bayer to GRBG
 matching the Windows AIQB calibration data.
 
+Note: On Surface Pro 10 (MTL), the front camera currently produces
+black frames due to missing C-PHY support in ipu6-isys-dwc-phy.c.
+This driver is correct and complete; the limitation is in the IPU6
+PHY driver which requires Intel to add C-PHY initialisation support.
+
 Patchset: cameras
 ---
- drivers/media/i2c/imx681.c | 924 +++++++++++++++++++++++++++++++++++++
- 1 file changed, 924 insertions(+)
+ drivers/media/i2c/imx681.c | 895 +++++++++++++++++++++++++++++++++++++
+ 1 file changed, 895 insertions(+)
  create mode 100644 drivers/media/i2c/imx681.c
 
 diff --git a/drivers/media/i2c/imx681.c b/drivers/media/i2c/imx681.c
 new file mode 100644
-index 0000000..f559d53
+index 0000000..0459085
 --- /dev/null
 +++ b/drivers/media/i2c/imx681.c
-@@ -0,0 +1,924 @@
+@@ -0,0 +1,895 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Sony IMX681 CMOS Image Sensor Driver
@@ -1164,12 +1169,14 @@ index 0000000..f559d53
 +/* MIPI lanes */
 +#define IMX681_NUM_LANES		2
 +
-+#define IMX681_LINK_FREQ_MTL    380800000LL  /* Meteor Lake (SP10), C-PHY */
-+#define IMX681_LINK_FREQ_LNL    969600000LL  /* Lunar Lake (SP11), D-PHY */
++/* SP10: Link freq = 19.2MHz × 119 / 3 / 2 = 380.8 MHz */
++#define IMX681_LINK_FREQ    		380800000LL
++
++/* PLL multiplier = 119 = 0x77 */
++/* PLL2: pre_div=3, multiplier=119 (0x0077) */
 +
 +/* Pixel rate = link_freq * 2 (DDR) * num_lanes / bpp */
-+#define IMX681_PIXEL_RATE_MTL	(IMX681_LINK_FREQ_MTL * 2 * IMX681_NUM_LANES / 10)
-+#define IMX681_PIXEL_RATE_LNL	(IMX681_LINK_FREQ_LNL * 2 * IMX681_NUM_LANES / 10)
++#define IMX681_PIXEL_RATE		(IMX681_LINK_FREQ * 2 * IMX681_NUM_LANES / 10)
 +
 +/* Power-on delay after reset deassert */
 +#define IMX681_RESET_DELAY_US		1000
@@ -1181,8 +1188,7 @@ index 0000000..f559d53
 +#define IMAGE_PAD			0
 +
 +static const s64 imx681_link_frequencies[] = {
-+	IMX681_LINK_FREQ_MTL,
-+	IMX681_LINK_FREQ_LNL,
++	IMX681_LINK_FREQ,
 +};
 +
 +/*
@@ -1219,24 +1225,16 @@ index 0000000..f559d53
 +	{ CCI_REG24(0x040D), 0x040A50 },
 +	/* X_OUTPUT_SIZE=3844, Y_OUTPUT_SIZE=2640 */
 +	{ CCI_REG32(0x034C), 0x0F040A50 },
++	/* PLL multiplier = 225 */
++	{ CCI_REG8(0x0307),  0x77 },
++	/* PLL2: pre_div=3, multiplier=303 (0x012F) */
++	{ CCI_REG24(0x030D), 0x030077 },
 +	/* Frame duration initial */
 +	{ CCI_REG16(0x022A), 0x0C61 },
 +	/* Vendor specific registers */
 +	{ CCI_REG8(0x7E9B),  0x02 },
 +	{ CCI_REG8(0x0368),  0x00 },
 +	{ CCI_REG8(0xD383),  0x01 },
-+};
-+
-+/* SP10: Meteor Lake, C-PHY, 380.8 MHz */
-+static const struct cci_reg_sequence imx681_pll_regs_mtl[] = {
-+	{ CCI_REG8(0x0307),  0x77 },      /* PLL multiplier = 119 */
-+	{ CCI_REG24(0x030D), 0x030077 },  /* PLL2: pre_div=3, mul=119 */
-+};
-+
-+/* SP11: Lunar Lake, D-PHY, 969.6 MHz */
-+static const struct cci_reg_sequence imx681_pll_regs_lnl[] = {
-+	{ CCI_REG8(0x0307),  0xE1 },      /* PLL multiplier = 225 */
-+	{ CCI_REG24(0x030D), 0x03012F },  /* PLL2: pre_div=3, mul=303 */
 +};
 +
 +/*
@@ -1499,29 +1497,12 @@ index 0000000..f559d53
 +{
 +	int ret;
 +
-+	dev_info(imx681->dev, "starting stream: %dx%d RAW10 2-lane\n",
-+		IMX681_WIDTH, IMX681_HEIGHT);
 +
 +	/* Write init register sequence */
 +	ret = cci_multi_reg_write(imx681->cci, imx681_init_regs,
 +				  ARRAY_SIZE(imx681_init_regs), NULL);
 +	if (ret) {
 +		dev_err(imx681->dev, "failed to write init regs: %d\n", ret);
-+		return ret;
-+	}
-+
-+	/* Select PLL registers based on negotiated link frequency */
-+	if (imx681->link_freq_bitmap & BIT(0)) {
-+		/* MTL / SP10: 380.8 MHz C-PHY */
-+		ret = cci_multi_reg_write(imx681->cci, imx681_pll_regs_mtl,
-+					  ARRAY_SIZE(imx681_pll_regs_mtl), NULL);
-+	} else {
-+		/* LNL / SP11: 969.6 MHz D-PHY */
-+		ret = cci_multi_reg_write(imx681->cci, imx681_pll_regs_lnl,
-+					  ARRAY_SIZE(imx681_pll_regs_lnl), NULL);
-+	}
-+	if (ret) {
-+		dev_err(imx681->dev, "failed to write PLL regs: %d\n", ret);
 +		return ret;
 +	}
 +
@@ -1553,7 +1534,6 @@ index 0000000..f559d53
 +		return ret;
 +	}
 +
-+	dev_info(imx681->dev, "streaming started\n");
 +	return 0;
 +}
 +
@@ -1573,7 +1553,6 @@ index 0000000..f559d53
 +				 struct v4l2_subdev_state *state,
 +				 u32 pad, u64 streams_mask)
 +{
-+	dev_info(sd->dev, "enable_streams called pad=%d mask=0x%llx\n", pad, streams_mask);
 +	struct imx681 *imx681 = to_imx681(sd);
 +	int ret;
 +
@@ -1587,7 +1566,6 @@ index 0000000..f559d53
 +	}
 +
 +	ret = imx681_start_streaming(imx681);
-+	dev_info(sd->dev, "start_streaming returned %d\n", ret);
 +	if (ret)
 +		pm_runtime_put_autosuspend(imx681->dev);
 +
@@ -1708,19 +1686,16 @@ index 0000000..f559d53
 +	struct v4l2_fwnode_device_properties props;
 +	struct v4l2_ctrl *link_freq;
 +	s64 hblank, vblank;
-+	u64 pixel_rate;
 +	int ret;
 +
 +	ret = v4l2_ctrl_handler_init(ctrl_hdlr, 9);
 +	if (ret)
 +		return ret;
 +
-+	/* Pixel rate (read-only) — depends on platform link frequency */
-+	pixel_rate = (imx681->link_freq_bitmap & BIT(0)) ?
-+			 IMX681_PIXEL_RATE_MTL : IMX681_PIXEL_RATE_LNL;
++	/* Pixel rate (read-only) */
 +	v4l2_ctrl_new_std(ctrl_hdlr, &imx681_ctrl_ops,
-+			  V4L2_CID_PIXEL_RATE, pixel_rate,
-+			  pixel_rate, 1, pixel_rate);
++			  V4L2_CID_PIXEL_RATE, IMX681_PIXEL_RATE,
++			  IMX681_PIXEL_RATE, 1, IMX681_PIXEL_RATE);
 +
 +	/* Link frequency (read-only) */
 +	link_freq = v4l2_ctrl_new_int_menu(ctrl_hdlr, &imx681_ctrl_ops,
@@ -1796,7 +1771,7 @@ index 0000000..f559d53
 +{
 +	struct fwnode_handle *fwnode = dev_fwnode(imx681->dev);
 +	struct v4l2_fwnode_endpoint bus_cfg = {
-+		.bus_type = V4L2_MBUS_UNKNOWN,
++		.bus_type = V4L2_MBUS_CSI2_CPHY,
 +	};
 +	struct fwnode_handle *ep;
 +	int ret;
@@ -1951,8 +1926,9 @@ index 0000000..f559d53
 +	pm_runtime_put_autosuspend(imx681->dev);
 +
 +	dev_info(imx681->dev,
-+		 "IMX681 probed successfully: %dx%d\n",
-+		 IMX681_WIDTH, IMX681_HEIGHT);
++		 "IMX681 probed successfully: %dx%d @ %lld Hz link freq\n",
++		 IMX681_WIDTH, IMX681_HEIGHT, IMX681_LINK_FREQ);
++
 +	return 0;
 +
 +error_subdev_cleanup:
@@ -2021,9 +1997,9 @@ index 0000000..f559d53
 2.53.0
 
 
-From 929c24b59a5066c83593634105c830c887588509 Mon Sep 17 00:00:00 2001
+From 6d3417b5fff9e0d6a8aabf260756bf2ae5daa5d1 Mon Sep 17 00:00:00 2001
 From: "D.J. Mulder" <djmulder@example.com>
-Date: Fri, 29 May 2026 15:28:53 +0200
+Date: Fri, 29 May 2026 15:57:33 +0200
 Subject: [PATCH 2/5] media: ipu-bridge: Add Surface Pro 10 camera sensor
  support
 
@@ -2041,11 +2017,11 @@ Surface Pro 10 (Meteor Lake / IPU6EP-MTL):
 
 Patchset: cameras
 ---
- drivers/media/pci/intel/ipu-bridge.c | 80 +++++++++++++++++++++++++---
- 1 file changed, 72 insertions(+), 8 deletions(-)
+ drivers/media/pci/intel/ipu-bridge.c | 84 ++++++++++++++++++++++++----
+ 1 file changed, 74 insertions(+), 10 deletions(-)
 
 diff --git a/drivers/media/pci/intel/ipu-bridge.c b/drivers/media/pci/intel/ipu-bridge.c
-index a986e30..fb17d20 100644
+index a986e30..3aaea3b 100644
 --- a/drivers/media/pci/intel/ipu-bridge.c
 +++ b/drivers/media/pci/intel/ipu-bridge.c
 @@ -5,6 +5,7 @@
@@ -2185,11 +2161,11 @@ index a986e30..fb17d20 100644
  	int ret;
  
  	for_each_acpi_dev_match(adev, cfg->hid, NULL, -1) {
-+		dev_info(bridge->dev, "Trying to connect sensor %s\n", cfg->hid);
++		dev_dbg(bridge->dev, "Trying to connect sensor %s\n", cfg->hid);
  		if (!ACPI_PTR(adev->status.enabled))
  			continue;
  
-@@ -705,6 +764,10 @@ static int ipu_bridge_connect_sensor(const struct ipu_sensor_config *cfg,
+@@ -705,11 +764,15 @@ static int ipu_bridge_connect_sensor(const struct ipu_sensor_config *cfg,
  		primary = acpi_fwnode_handle(adev);
  		primary->secondary = fwnode;
  
@@ -2200,6 +2176,12 @@ index a986e30..fb17d20 100644
  		ret = ipu_bridge_instantiate_ivsc(sensor);
  		if (ret)
  			goto err_free_swnodes;
+ 
+-		dev_info(bridge->dev, "Found supported sensor %s\n",
++		dev_dbg(bridge->dev, "Found supported sensor %s\n",
+ 			 acpi_dev_name(adev));
+ 
+ 		bridge->n_sensors++;
 @@ -811,9 +874,10 @@ int ipu_bridge_init(struct device *dev,
  		return 0;
  
@@ -2213,13 +2195,22 @@ index a986e30..fb17d20 100644
  	if (!bridge)
  		return -ENOMEM;
  
+@@ -843,7 +907,7 @@ int ipu_bridge_init(struct device *dev,
+ 	if (ret || bridge->n_sensors == 0)
+ 		goto err_unregister_ipu;
+ 
+-	dev_info(dev, "Connected %d cameras\n", bridge->n_sensors);
++	dev_dbg(dev, "Connected %d cameras\n", bridge->n_sensors);
+ 
+ 	fwnode = software_node_fwnode(&bridge->ipu_hid_node);
+ 	if (!fwnode) {
 -- 
 2.53.0
 
 
-From 200de783ce8201f1f9d679141c65c1bc4e6e94ff Mon Sep 17 00:00:00 2001
+From 3694289bbf97d2004146090d384ea73562e19692 Mon Sep 17 00:00:00 2001
 From: "D.J. Mulder" <djmulder@example.com>
-Date: Fri, 29 May 2026 15:29:18 +0200
+Date: Fri, 29 May 2026 15:57:52 +0200
 Subject: [PATCH 3/5] platform/x86: int3472: Add GPIO type 0x08 (DVDD) and 0x10
  (DOVDD) support
 
@@ -2240,11 +2231,11 @@ Replaces the Surface Pro 9 workaround which used raw magic numbers
 
 Patchset: cameras
 ---
- drivers/platform/x86/intel/int3472/discrete.c | 156 +++++++++++++-----
- 1 file changed, 117 insertions(+), 39 deletions(-)
+ drivers/platform/x86/intel/int3472/discrete.c | 154 +++++++++++++-----
+ 1 file changed, 115 insertions(+), 39 deletions(-)
 
 diff --git a/drivers/platform/x86/intel/int3472/discrete.c b/drivers/platform/x86/intel/int3472/discrete.c
-index fee7e56..e2562b3 100644
+index fee7e56..b0c8da3 100644
 --- a/drivers/platform/x86/intel/int3472/discrete.c
 +++ b/drivers/platform/x86/intel/int3472/discrete.c
 @@ -5,18 +5,18 @@
@@ -2277,7 +2268,7 @@ index fee7e56..e2562b3 100644
  {
  	char *path = agpio->resource_source.string_ptr;
  	struct acpi_device *adev;
-@@ -71,24 +71,26 @@ static int skl_int3472_fill_gpiod_lookup(struct gpiod_lookup *table_entry,
+@@ -71,24 +71,25 @@ static int skl_int3472_fill_gpiod_lookup(struct gpiod_lookup *table_entry,
  	if (!adev)
  		return -ENODEV;
  
@@ -2294,7 +2285,6 @@ index fee7e56..e2562b3 100644
  {
  	int ret;
  
-+	dev_info(int3472->dev, "Mapping GPIO pin %d to sensor as %s (sensor gpio %d/%d)\n",
 +         	agpio->pin_table[0], con_id, int3472->n_sensor_gpios, INT3472_MAX_SENSOR_GPIOS);
  	if (int3472->n_sensor_gpios >= INT3472_MAX_SENSOR_GPIOS) {
  		dev_warn(int3472->dev, "Too many GPIOs mapped\n");
@@ -2307,7 +2297,7 @@ index fee7e56..e2562b3 100644
  	if (ret)
  		return ret;
  
-@@ -101,23 +103,23 @@ static int skl_int3472_map_gpio_to_sensor(struct int3472_discrete_device *int347
+@@ -101,23 +102,23 @@ static int skl_int3472_map_gpio_to_sensor(struct int3472_discrete_device *int347
  static struct gpio_desc *
  skl_int3472_gpiod_get_from_temp_lookup(struct int3472_discrete_device *int3472,
  				       struct acpi_resource_gpio *agpio,
@@ -2335,7 +2325,7 @@ index fee7e56..e2562b3 100644
  	gpiod_remove_lookup_table(lookup);
  
  	return desc;
-@@ -129,7 +131,8 @@ skl_int3472_gpiod_get_from_temp_lookup(struct int3472_discrete_device *int3472,
+@@ -129,7 +130,8 @@ skl_int3472_gpiod_get_from_temp_lookup(struct int3472_discrete_device *int3472,
   * @hid: The ACPI HID of the device without the instance number e.g. INT347E
   * @type_from: The GPIO type from ACPI ?SDT
   * @type_to: The assigned GPIO type, typically same as @type_from
@@ -2345,7 +2335,7 @@ index fee7e56..e2562b3 100644
   * @polarity_low: GPIO_ACTIVE_LOW true if the @polarity_low is true,
   * GPIO_ACTIVE_HIGH otherwise
   */
-@@ -138,16 +141,38 @@ struct int3472_gpio_map {
+@@ -138,16 +140,38 @@ struct int3472_gpio_map {
  	u8 type_from;
  	u8 type_to;
  	bool polarity_low;
@@ -2388,7 +2378,7 @@ index fee7e56..e2562b3 100644
  	unsigned int i;
  
  	for (i = 0; i < ARRAY_SIZE(int3472_gpio_map); i++) {
-@@ -162,40 +187,60 @@ static void int3472_get_func_and_polarity(struct acpi_device *adev, u8 *type,
+@@ -162,40 +186,60 @@ static void int3472_get_func_and_polarity(struct acpi_device *adev, u8 *type,
  		if (!acpi_dev_hid_uid_match(adev, int3472_gpio_map[i].hid, NULL))
  			continue;
  
@@ -2457,7 +2447,7 @@ index fee7e56..e2562b3 100644
  		*gpio_flags = GPIO_ACTIVE_HIGH;
  		break;
  	}
-@@ -216,6 +261,8 @@ static void int3472_get_func_and_polarity(struct acpi_device *adev, u8 *type,
+@@ -216,6 +260,8 @@ static void int3472_get_func_and_polarity(struct acpi_device *adev, u8 *type,
   * 0x0b Power enable
   * 0x0c Clock enable
   * 0x0d Privacy LED
@@ -2466,7 +2456,7 @@ index fee7e56..e2562b3 100644
   *
   * There are some known platform specific quirks where that does not quite
   * hold up; for example where a pin with type 0x01 (Power down) is mapped to
-@@ -237,13 +284,15 @@ static int skl_int3472_handle_gpio_resources(struct acpi_resource *ares,
+@@ -237,13 +283,15 @@ static int skl_int3472_handle_gpio_resources(struct acpi_resource *ares,
  					     void *data)
  {
  	struct int3472_discrete_device *int3472 = data;
@@ -2484,14 +2474,13 @@ index fee7e56..e2562b3 100644
  	int ret;
  
  	if (!acpi_gpio_get_io_resource(ares, &agpio))
-@@ -266,27 +315,28 @@ static int skl_int3472_handle_gpio_resources(struct acpi_resource *ares,
+@@ -266,27 +314,27 @@ static int skl_int3472_handle_gpio_resources(struct acpi_resource *ares,
  
  	type = FIELD_GET(INT3472_GPIO_DSM_TYPE, obj->integer.value);
  
 -	int3472_get_func_and_polarity(int3472->sensor, &type, &func, &gpio_flags);
 -
 +	int3472_get_con_id_and_polarity(int3472, &type, &con_id, &gpio_flags, &enable_time_us);
-+	dev_info(int3472->dev, "Processing GPIO pin %d type 0x%02x con_id %s\n",
 +        	agpio->pin_table[0], type, con_id);
  	pin = FIELD_GET(INT3472_GPIO_DSM_PIN, obj->integer.value);
  	/* Pin field is not really used under Windows and wraps around at 8 bits */
@@ -2519,7 +2508,7 @@ index fee7e56..e2562b3 100644
  		if (ret)
  			err_msg = "Failed to map GPIO pin to sensor\n";
  
-@@ -294,7 +344,10 @@ static int skl_int3472_handle_gpio_resources(struct acpi_resource *ares,
+@@ -294,7 +342,10 @@ static int skl_int3472_handle_gpio_resources(struct acpi_resource *ares,
  	case INT3472_GPIO_TYPE_CLK_ENABLE:
  	case INT3472_GPIO_TYPE_PRIVACY_LED:
  	case INT3472_GPIO_TYPE_POWER_ENABLE:
@@ -2531,7 +2520,7 @@ index fee7e56..e2562b3 100644
  		if (IS_ERR(gpio)) {
  			ret = PTR_ERR(gpio);
  			err_msg = "Failed to get GPIO\n";
-@@ -315,15 +368,25 @@ static int skl_int3472_handle_gpio_resources(struct acpi_resource *ares,
+@@ -315,15 +366,25 @@ static int skl_int3472_handle_gpio_resources(struct acpi_resource *ares,
  
  			break;
  		case INT3472_GPIO_TYPE_POWER_ENABLE:
@@ -2559,7 +2548,7 @@ index fee7e56..e2562b3 100644
  		break;
  	default:
  		dev_warn(int3472->dev,
-@@ -343,7 +406,7 @@ static int skl_int3472_handle_gpio_resources(struct acpi_resource *ares,
+@@ -343,7 +404,7 @@ static int skl_int3472_handle_gpio_resources(struct acpi_resource *ares,
  	return 1;
  }
  
@@ -2568,7 +2557,7 @@ index fee7e56..e2562b3 100644
  {
  	LIST_HEAD(resource_list);
  	int ret;
-@@ -368,28 +431,39 @@ static int skl_int3472_parse_crs(struct int3472_discrete_device *int3472)
+@@ -368,28 +429,39 @@ static int skl_int3472_parse_crs(struct int3472_discrete_device *int3472)
  
  	return 0;
  }
@@ -2611,7 +2600,7 @@ index fee7e56..e2562b3 100644
  	ret = skl_int3472_fill_cldb(adev, &cldb);
  	if (ret) {
  		dev_err(&pdev->dev, "Couldn't fill CLDB structure\n");
-@@ -413,6 +487,9 @@ static int skl_int3472_discrete_probe(struct platform_device *pdev)
+@@ -413,6 +485,9 @@ static int skl_int3472_discrete_probe(struct platform_device *pdev)
  	platform_set_drvdata(pdev, int3472);
  	int3472->clock.imgclk_index = cldb.clock_source;
  
@@ -2621,7 +2610,7 @@ index fee7e56..e2562b3 100644
  	ret = skl_int3472_get_sensor_adev_and_name(&pdev->dev, &int3472->sensor,
  						   &int3472->sensor_name);
  	if (ret)
-@@ -424,7 +501,7 @@ static int skl_int3472_discrete_probe(struct platform_device *pdev)
+@@ -424,7 +499,7 @@ static int skl_int3472_discrete_probe(struct platform_device *pdev)
  	 */
  	INIT_LIST_HEAD(&int3472->gpios.list);
  
@@ -2630,7 +2619,7 @@ index fee7e56..e2562b3 100644
  	if (ret) {
  		skl_int3472_discrete_remove(pdev);
  		return ret;
-@@ -453,3 +530,4 @@ module_platform_driver(int3472_discrete);
+@@ -453,3 +528,4 @@ module_platform_driver(int3472_discrete);
  MODULE_DESCRIPTION("Intel SkyLake INT3472 ACPI Discrete Device Driver");
  MODULE_AUTHOR("Daniel Scally <djrscally@gmail.com>");
  MODULE_LICENSE("GPL v2");
@@ -2639,9 +2628,9 @@ index fee7e56..e2562b3 100644
 2.53.0
 
 
-From 856ae2750ccc39b53ee4cd98e77ffb5ff1c9ef10 Mon Sep 17 00:00:00 2001
+From c09b1a55bdfc1b3b3943ef93d7f6c4428a97e8d3 Mon Sep 17 00:00:00 2001
 From: "D.J. Mulder" <djmulder@example.com>
-Date: Fri, 29 May 2026 15:29:38 +0200
+Date: Fri, 29 May 2026 15:58:07 +0200
 Subject: [PATCH 4/5] platform/x86: int3472: Mark clock critical and regulators
  always-on for SP10
 
@@ -2919,9 +2908,9 @@ index 16e36ac..3f280ef 100644
 2.53.0
 
 
-From 07977dd74206fd7459896f6fe144f2e0e5f9b5eb Mon Sep 17 00:00:00 2001
+From 5f303220052fe7290be7d93a43cfdaa3be874892 Mon Sep 17 00:00:00 2001
 From: "D.J. Mulder" <djmulder@example.com>
-Date: Fri, 29 May 2026 15:30:00 +0200
+Date: Fri, 29 May 2026 15:58:25 +0200
 Subject: [PATCH 5/5] media: i2c: ov13858: Add reset GPIO handling for Surface
  Pro 10
 
@@ -2939,11 +2928,11 @@ reads return 0xFF, causing probe to fail with -EIO on chip ID check.
 
 Patchset: cameras
 ---
- drivers/media/i2c/ov13858.c | 94 +++++++++++++++++++++++++------------
- 1 file changed, 63 insertions(+), 31 deletions(-)
+ drivers/media/i2c/ov13858.c | 93 ++++++++++++++++++++++++-------------
+ 1 file changed, 62 insertions(+), 31 deletions(-)
 
 diff --git a/drivers/media/i2c/ov13858.c b/drivers/media/i2c/ov13858.c
-index 7a3fc1d..f4e8493 100644
+index 7a3fc1d..c924fc2 100644
 --- a/drivers/media/i2c/ov13858.c
 +++ b/drivers/media/i2c/ov13858.c
 @@ -2,9 +2,12 @@
@@ -3009,7 +2998,7 @@ index 7a3fc1d..f4e8493 100644
  		break;
  	default:
 -		dev_info(&client->dev,
-+		dev_info(ov13858->dev,
++		dev_dbg(ov13858->dev,
  			 "ctrl(id:0x%x,val:0x%x) is not handled\n",
  			 ctrl->id, ctrl->val);
  		break;
@@ -3128,7 +3117,7 @@ index 7a3fc1d..f4e8493 100644
  	if (ret)
  		goto error;
  
-@@ -1660,24 +1661,55 @@ static void ov13858_free_controls(struct ov13858 *ov13858)
+@@ -1660,24 +1661,54 @@ static void ov13858_free_controls(struct ov13858 *ov13858)
  static int ov13858_probe(struct i2c_client *client)
  {
  	struct ov13858 *ov13858;
@@ -3164,7 +3153,6 @@ index 7a3fc1d..f4e8493 100644
 +
 +	/* Take sensor out of reset */
 +	ov13858->reset_gpio = devm_gpiod_get_optional(ov13858->dev, "reset", GPIOD_OUT_HIGH);
-+	dev_info(ov13858->dev, "reset_gpio = %p, IS_ERR=%d\n",
 +		 ov13858->reset_gpio, IS_ERR(ov13858->reset_gpio));
 +	if (IS_ERR(ov13858->reset_gpio))
 +		return dev_err_probe(ov13858->dev, PTR_ERR(ov13858->reset_gpio),
@@ -3190,7 +3178,7 @@ index 7a3fc1d..f4e8493 100644
  		return ret;
  	}
  
-@@ -1699,7 +1731,7 @@ static int ov13858_probe(struct i2c_client *client)
+@@ -1699,7 +1730,7 @@ static int ov13858_probe(struct i2c_client *client)
  	ov13858->pad.flags = MEDIA_PAD_FL_SOURCE;
  	ret = media_entity_pads_init(&ov13858->sd.entity, 1, &ov13858->pad);
  	if (ret) {
@@ -3199,7 +3187,7 @@ index 7a3fc1d..f4e8493 100644
  		goto error_handler_free;
  	}
  
-@@ -1711,9 +1743,9 @@ static int ov13858_probe(struct i2c_client *client)
+@@ -1711,9 +1742,9 @@ static int ov13858_probe(struct i2c_client *client)
  	 * Device is already turned on by i2c-core with ACPI domain PM.
  	 * Enable runtime PM and turn off the device.
  	 */
@@ -3212,7 +3200,7 @@ index 7a3fc1d..f4e8493 100644
  
  	return 0;
  
-@@ -1722,7 +1754,7 @@ error_media_entity:
+@@ -1722,7 +1753,7 @@ error_media_entity:
  
  error_handler_free:
  	ov13858_free_controls(ov13858);
@@ -3221,7 +3209,7 @@ index 7a3fc1d..f4e8493 100644
  
  	return ret;
  }
-@@ -1736,7 +1768,7 @@ static void ov13858_remove(struct i2c_client *client)
+@@ -1736,7 +1767,7 @@ static void ov13858_remove(struct i2c_client *client)
  	media_entity_cleanup(&sd->entity);
  	ov13858_free_controls(ov13858);
  
