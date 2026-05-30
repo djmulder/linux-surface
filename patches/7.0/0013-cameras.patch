@@ -1055,6 +1055,13 @@ index f5456330b..3418ff475 100644
 +		},
 +		.driver_data = "OVTI5693",
 +	},
++	{
++		.matches = {
++			DMI_MATCH(DMI_SYS_VENDOR, "Microsoft Corporation"),
++			DMI_MATCH(DMI_PRODUCT_NAME, "Surface Pro 10 for Business"),
++		},
++		.driver_data = "OVTID858",
++	},
  	{} /* Terminating entry */
  };
  
