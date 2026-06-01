@@ -1,0 +1,163 @@
+--- orig/linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-dwc-phy.c	2026-04-12 22:48:06.000000000 +0200
++++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-dwc-phy.c	2026-06-01 09:48:56.292661805 +0200
+@@ -299,6 +299,66 @@
+ 	return DPHY_FREQ_RANGE_INVALID_INDEX;
+ }
+ 
++
++struct dwc_cphy_freq_range {
++	u8 hsfreq;
++	u32 min_msps;
++	u32 max_msps;
++	u32 osc_freq_target;
++};
++
++static const struct dwc_cphy_freq_range cphy_freqranges[] = {
++	{0x00,  80,  149,  335},
++	{0x10, 150,  249,  335},
++	{0x20, 250,  349,  335},
++	{0x30, 350,  449,  335},
++	{0x01, 450,  549,  335},
++	{0x11, 550,  649,  335},
++	{0x21, 650,  749,  335},
++	{0x31, 750,  899,  335},
++	{0x02, 900, 1049,  248},
++	{0x12, 1050, 1249, 248},
++	{0x22, 1250, 1499, 248},
++	{0x32, 1500, 1999, 248},
++	{0x03, 2000, 2500, 248},
++};
++#define CPHY_FREQ_RANGE_NUM ARRAY_SIZE(cphy_freqranges)
++
++static int ipu6_isys_dwc_phy_config_cphy(struct ipu6_isys *isys,
++					 u32 phy_id, u32 msps)
++{
++	struct ipu6_bus_device *adev = isys->adev;
++	struct device *dev = &adev->auxdev.dev;
++	struct ipu6_device *isp = adev->isp;
++	u32 cfg_clk_freqrange;
++	u32 osc_freq_target = 335;
++	u8 hsfreq = 0x00;
++	unsigned int i;
++
++	for (i = 0; i < CPHY_FREQ_RANGE_NUM; i++) {
++		if (msps >= cphy_freqranges[i].min_msps &&
++		    msps <= cphy_freqranges[i].max_msps) {
++			hsfreq = cphy_freqranges[i].hsfreq;
++			osc_freq_target = cphy_freqranges[i].osc_freq_target;
++			break;
++		}
++	}
++
++	dwc_dphy_write_mask(isys, phy_id, IPU6_DWC_DPHY_HSFREQRANGE,
++			    hsfreq, 0, 7);
++	dwc_dphy_ifc_write_mask(isys, phy_id, 0xe4, 0x1, 0, 1);
++	dwc_dphy_ifc_write_mask(isys, phy_id, 0xe2,
++				osc_freq_target & 0xff, 0, 8);
++	dwc_dphy_ifc_write_mask(isys, phy_id, 0xe3,
++				(osc_freq_target >> 8) & 0xf, 0, 4);
++	cfg_clk_freqrange = (isp->buttress.ref_clk - 170) * 4 / 10;
++	dwc_dphy_write_mask(isys, phy_id, IPU6_DWC_DPHY_CFGCLKFREQRANGE,
++			    cfg_clk_freqrange, 0, 8);
++	dwc_dphy_write_mask(isys, phy_id, IPU6_DWC_DPHY_DFT_CTRL2, 0x1, 4, 1);
++	dwc_dphy_write_mask(isys, phy_id, IPU6_DWC_DPHY_DFT_CTRL2, 0x1, 8, 1);
++	return 0;
++}
++
+ static int ipu6_isys_dwc_phy_config(struct ipu6_isys *isys,
+ 				    u32 phy_id, u32 mbps)
+ {
+@@ -464,6 +524,30 @@
+ 	}
+ 
+ 	nlanes = cfg->nlanes;
++
++	dev_info(dev, "PHY setup: port=%u nlanes=%u cphy=%d on=%d mbps=%u\n",
++		 port, nlanes, cfg->cphy, on, mbps);
++
++	if (on && cfg->cphy) {
++		s64 cphy_link_freq;
++		u32 sym_rate;
++		cphy_link_freq = ipu6_isys_csi2_get_link_freq(&isys->csi2[port]);
++		if (cphy_link_freq < 0) {
++			dev_err(dev, "C-PHY get link freq failed: %lld\n", cphy_link_freq);
++			return (int)cphy_link_freq;
++		}
++		do_div(cphy_link_freq, 1000000);
++		sym_rate = (u32)cphy_link_freq;
++		dev_info(dev, "C-PHY: config phy %u with %u trios at %u Msps\n",
++			 port, nlanes, sym_rate);
++		phy_id = port;
++		ipu6_isys_dwc_phy_reset(isys, phy_id);
++		ret = ipu6_isys_dwc_phy_config_cphy(isys, phy_id, sym_rate);
++		if (ret)
++			return ret;
++		return ipu6_isys_dwc_phy_powerup_ack(isys, phy_id);
++	}
++
+ 	/* only port 0, 2 and 4 support 4 lanes */
+ 	if (nlanes == 4 && port % 2) {
+ 		dev_err(dev, "invalid csi-port %u with %u lanes\n", port,
+--- orig/linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys.h	2026-04-12 22:48:06.000000000 +0200
++++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys.h	2026-06-01 09:45:28.991621419 +0200
+@@ -95,6 +95,7 @@
+ struct ipu6_isys_csi2_config {
+ 	u32 nlanes;
+ 	u32 port;
++	bool cphy;
+ };
+ 
+ struct sensor_async_sd {
+--- orig/linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys.c	2026-04-12 22:48:06.000000000 +0200
++++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys.c	2026-06-01 09:46:11.985601108 +0200
+@@ -132,6 +132,7 @@
+ 	}
+ 
+ 	isys->csi2[csi2->port].nlanes = csi2->nlanes;
++	isys->csi2[csi2->port].cphy = csi2->cphy;
+ 
+ 	return 0;
+ 
+@@ -725,7 +726,7 @@
+ 
+ 	for (i = 0; i < ISYS_MAX_PORTS; i++) {
+ 		struct v4l2_fwnode_endpoint vep = {
+-			.bus_type = V4L2_MBUS_CSI2_DPHY
++			.bus_type = V4L2_MBUS_UNKNOWN
+ 		};
+ 		struct sensor_async_sd *s_asd;
+ 		struct fwnode_handle *ep;
+@@ -751,6 +752,13 @@
+ 
+ 		s_asd->csi2.port = vep.base.port;
+ 		s_asd->csi2.nlanes = vep.bus.mipi_csi2.num_data_lanes;
++		s_asd->csi2.cphy = (vep.bus_type == V4L2_MBUS_CSI2_CPHY);
++		/* Fallback: IPU6EP-MTL port 4 is always C-PHY (IMX681/SONY0681) */
++		if (!s_asd->csi2.cphy && is_ipu6ep_mtl(isp->hw_ver) && vep.base.port == 4)
++			s_asd->csi2.cphy = true;
++		dev_info(&isp->pdev->dev, "port %u: bus_type=%d nlanes=%u cphy=%d\n",
++			 vep.base.port, vep.bus_type,
++			 vep.bus.mipi_csi2.num_data_lanes, s_asd->csi2.cphy);
+ 
+ 		dev_dbg(dev, "remote endpoint port %d with %d lanes added\n",
+ 			s_asd->csi2.port, s_asd->csi2.nlanes);
+--- orig/linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-csi2.h	2026-04-12 22:48:06.000000000 +0200
++++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-csi2.h	2026-06-01 09:45:28.992686208 +0200
+@@ -43,6 +43,7 @@
+ 	u32 receiver_errors;
+ 	unsigned int nlanes;
+ 	unsigned int port;
++	bool cphy;
+ };
+ 
+ struct ipu6_isys_csi2_timing {
+--- orig/linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-csi2.c	2026-04-12 22:48:06.000000000 +0200
++++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-csi2.c	2026-06-01 09:46:11.961944288 +0200
+@@ -247,6 +247,7 @@
+ 
+ 	cfg.port = csi2->port;
+ 	cfg.nlanes = nlanes;
++	cfg.cphy = csi2->cphy;
+ 
+ 	mask = isys->pdata->ipdata->csi2.irq_mask;
+ 	nports = isys->pdata->ipdata->csi2.nports;
