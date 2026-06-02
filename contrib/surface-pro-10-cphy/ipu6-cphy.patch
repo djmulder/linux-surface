@@ -1,6 +1,14 @@
 --- orig/linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-dwc-phy.c	2026-04-12 22:48:06.000000000 +0200
-+++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-dwc-phy.c	2026-06-01 09:48:56.292661805 +0200
-@@ -299,6 +299,66 @@
++++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-dwc-phy.c	2026-06-02 23:30:58.630798097 +0200
+@@ -206,6 +206,7 @@
+ 	if (ret)
+ 		dev_err(dev, "Dphy %d power up failed, state 0x%x", phy_id,
+ 			fsm_state);
++	dev_info(dev, "Dphy %d FSM state=0x%x after powerup\n", phy_id, fsm_state);
+ 
+ 	return ret;
+ }
+@@ -299,6 +300,68 @@
  	return DPHY_FREQ_RANGE_INVALID_INDEX;
  }
  
@@ -49,6 +57,8 @@
 +		}
 +	}
 +
++	/* Set C-PHY mode in PHY - IFC reg 0x1f bit 0 selects CPHY vs DPHY */
++	dwc_dphy_ifc_write_mask(isys, phy_id, 0x1f, 0x1, 0, 1);
 +	dwc_dphy_write_mask(isys, phy_id, IPU6_DWC_DPHY_HSFREQRANGE,
 +			    hsfreq, 0, 7);
 +	dwc_dphy_ifc_write_mask(isys, phy_id, 0xe4, 0x1, 0, 1);
@@ -67,7 +77,7 @@
  static int ipu6_isys_dwc_phy_config(struct ipu6_isys *isys,
  				    u32 phy_id, u32 mbps)
  {
-@@ -464,6 +524,30 @@
+@@ -464,6 +527,34 @@
  	}
  
  	nlanes = cfg->nlanes;
@@ -89,10 +99,14 @@
 +			 port, nlanes, sym_rate);
 +		phy_id = port;
 +		ipu6_isys_dwc_phy_reset(isys, phy_id);
++		/* Set C-PHY mode: CORE_DIG_RW_COMMON_7 lower 12 bits = 0x88e */
++		dwc_dphy_ifc_write_mask(isys, phy_id, 0x88e, 0x15, 0, 9);
 +		ret = ipu6_isys_dwc_phy_config_cphy(isys, phy_id, sym_rate);
 +		if (ret)
 +			return ret;
-+		return ipu6_isys_dwc_phy_powerup_ack(isys, phy_id);
++		ret = ipu6_isys_dwc_phy_powerup_ack(isys, phy_id);
++		dev_info(dev, "C-PHY powerup_ack returned %d\n", ret);
++		return ret;
 +	}
 +
  	/* only port 0, 2 and 4 support 4 lanes */
@@ -109,16 +123,17 @@
  
  struct sensor_async_sd {
 --- orig/linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys.c	2026-04-12 22:48:06.000000000 +0200
-+++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys.c	2026-06-01 09:46:11.985601108 +0200
-@@ -132,6 +132,7 @@
++++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys.c	2026-06-03 00:40:18.997545346 +0200
+@@ -132,7 +132,7 @@
  	}
  
  	isys->csi2[csi2->port].nlanes = csi2->nlanes;
+-
 +	isys->csi2[csi2->port].cphy = csi2->cphy;
- 
  	return 0;
  
-@@ -725,7 +726,7 @@
+ unregister_subdev:
+@@ -725,7 +725,7 @@
  
  	for (i = 0; i < ISYS_MAX_PORTS; i++) {
  		struct v4l2_fwnode_endpoint vep = {
@@ -127,7 +142,7 @@
  		};
  		struct sensor_async_sd *s_asd;
  		struct fwnode_handle *ep;
-@@ -751,6 +752,13 @@
+@@ -751,6 +751,13 @@
  
  		s_asd->csi2.port = vep.base.port;
  		s_asd->csi2.nlanes = vep.bus.mipi_csi2.num_data_lanes;
@@ -141,6 +156,28 @@
  
  		dev_dbg(dev, "remote endpoint port %d with %d lanes added\n",
  			s_asd->csi2.port, s_asd->csi2.nlanes);
+@@ -1221,18 +1228,18 @@
+ 	ts = (u64)resp->timestamp[1] << 32 | resp->timestamp[0];
+ 
+ 	index = resp_type_to_index(resp->type);
+-	dev_dbg(&adev->auxdev.dev,
++	dev_info(&adev->auxdev.dev,
+ 		"FW resp %02d %s, stream %u, ts 0x%16.16llx, pin %d\n",
+ 		resp->type, fw_msg[index].msg, resp->stream_handle,
+ 		fw_msg[index].valid_ts ? ts : 0, resp->pin_id);
+ 
+ 	if (resp->error_info.error == IPU6_FW_ISYS_ERROR_STREAM_IN_SUSPENSION)
+ 		/* Suspension is kind of special case: not enough buffers */
+-		dev_dbg(&adev->auxdev.dev,
++		dev_info(&adev->auxdev.dev,
+ 			"FW error resp SUSPENSION, details %d\n",
+ 			resp->error_info.error_details);
+ 	else if (resp->error_info.error)
+-		dev_dbg(&adev->auxdev.dev,
++		dev_info(&adev->auxdev.dev,
+ 			"FW error resp error %d, details %d\n",
+ 			resp->error_info.error, resp->error_info.error_details);
+ 
 --- orig/linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-csi2.h	2026-04-12 22:48:06.000000000 +0200
 +++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-csi2.h	2026-06-01 09:45:28.992686208 +0200
 @@ -43,6 +43,7 @@
@@ -152,7 +189,7 @@
  
  struct ipu6_isys_csi2_timing {
 --- orig/linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-csi2.c	2026-04-12 22:48:06.000000000 +0200
-+++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-csi2.c	2026-06-01 09:46:11.961944288 +0200
++++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-csi2.c	2026-06-02 17:46:07.205081860 +0200
 @@ -247,6 +247,7 @@
  
  	cfg.port = csi2->port;
@@ -161,3 +198,35 @@
  
  	mask = isys->pdata->ipdata->csi2.irq_mask;
  	nports = isys->pdata->ipdata->csi2.nports;
+@@ -325,13 +326,16 @@
+ 	       CSI_PORT_REG_BASE_IRQ_ENABLE_OFFSET);
+ 
+ 	/* configure to enable FE and PPI2CSI */
+-	writel(0, csi2->base + CSI_REG_CSI_FE_MODE);
++	writel(cfg.cphy ? CSI_FE_CPHY_MODE : CSI_FE_DPHY_MODE,
++	       csi2->base + CSI_REG_CSI_FE_MODE);
+ 	writel(CSI_SENSOR_INPUT, csi2->base + CSI_REG_CSI_FE_MUX_CTRL);
+ 	writel(CSI_CNTR_SENSOR_LINE_ID | CSI_CNTR_SENSOR_FRAME_ID,
+ 	       csi2->base + CSI_REG_CSI_FE_SYNC_CNTR_SEL);
+-	writel(FIELD_PREP(PPI_INTF_CONFIG_NOF_ENABLED_DLANES_MASK, nlanes - 1),
++	writel(FIELD_PREP(PPI_INTF_CONFIG_NOF_ENABLED_DLANES_MASK, nlanes - 1) |
++	       (cfg.cphy ? PPI_INTF_CONFIG_PHY_TYPE_MASK : 0),
+ 	       csi2->base + CSI_REG_PPI2CSI_CONFIG_PPI_INTF);
+ 
++	writel(0x06, csi2->base + CSI_REG_PPI2CSI_CONFIG_CSI_FEATURE);
+ 	writel(1, csi2->base + CSI_REG_PPI2CSI_ENABLE);
+ 	writel(1, csi2->base + CSI_REG_CSI_FE_ENABLE);
+ 
+@@ -340,6 +344,12 @@
+ 		dev_err(dev, "csi-%d phy power up failed %d\n", csi2->port,
+ 			ret);
+ 
++	dev_info(dev, "CSI%u FE_MODE=0x%x FE_EN=0x%x PPI_CFG=0x%x PPI_EN=0x%x\n",
++		 csi2->port,
++		 readl(csi2->base + CSI_REG_CSI_FE_MODE),
++		 readl(csi2->base + CSI_REG_CSI_FE_ENABLE),
++		 readl(csi2->base + CSI_REG_PPI2CSI_CONFIG_PPI_INTF),
++		 readl(csi2->base + CSI_REG_PPI2CSI_ENABLE));
+ 	return ret;
+ }
+ 
