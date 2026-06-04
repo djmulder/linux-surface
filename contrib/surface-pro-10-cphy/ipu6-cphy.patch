@@ -1,4 +1,4 @@
---- orig/linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-dwc-phy.c	2026-04-12 22:48:06.000000000 +0200
+--- /dev/fd/63	2026-06-04 18:17:32.533585838 +0200
 +++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-dwc-phy.c	2026-06-02 23:30:58.630798097 +0200
 @@ -206,6 +206,7 @@
  	if (ret)
@@ -112,7 +112,7 @@
  	/* only port 0, 2 and 4 support 4 lanes */
  	if (nlanes == 4 && port % 2) {
  		dev_err(dev, "invalid csi-port %u with %u lanes\n", port,
---- orig/linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys.h	2026-04-12 22:48:06.000000000 +0200
+--- /dev/fd/63	2026-06-04 18:17:51.754726724 +0200
 +++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys.h	2026-06-01 09:45:28.991621419 +0200
 @@ -95,6 +95,7 @@
  struct ipu6_isys_csi2_config {
@@ -122,8 +122,8 @@
  };
  
  struct sensor_async_sd {
---- orig/linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys.c	2026-04-12 22:48:06.000000000 +0200
-+++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys.c	2026-06-03 00:40:18.997545346 +0200
+--- /dev/fd/63	2026-06-04 18:18:10.664865330 +0200
++++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys.c	2026-06-04 18:13:13.039965481 +0200
 @@ -132,7 +132,7 @@
  	}
  
@@ -133,6 +133,15 @@
  	return 0;
  
  unregister_subdev:
+@@ -378,7 +378,7 @@
+ 				if (!isys->csi2[i].base)
+ 					continue;
+ 				if (status_csi & IPU6_ISYS_UNISPART_IRQ_CSI2(i))
+-					ipu6_isys_csi2_isr(&isys->csi2[i]);
++									ipu6_isys_csi2_isr(&isys->csi2[i]);
+ 			}
+ 		}
+ 
 @@ -725,7 +725,7 @@
  
  	for (i = 0; i < ISYS_MAX_PORTS; i++) {
@@ -156,15 +165,7 @@
  
  		dev_dbg(dev, "remote endpoint port %d with %d lanes added\n",
  			s_asd->csi2.port, s_asd->csi2.nlanes);
-@@ -1221,18 +1228,18 @@
- 	ts = (u64)resp->timestamp[1] << 32 | resp->timestamp[0];
- 
- 	index = resp_type_to_index(resp->type);
--	dev_dbg(&adev->auxdev.dev,
-+	dev_info(&adev->auxdev.dev,
- 		"FW resp %02d %s, stream %u, ts 0x%16.16llx, pin %d\n",
- 		resp->type, fw_msg[index].msg, resp->stream_handle,
- 		fw_msg[index].valid_ts ? ts : 0, resp->pin_id);
+@@ -1228,11 +1235,11 @@
  
  	if (resp->error_info.error == IPU6_FW_ISYS_ERROR_STREAM_IN_SUSPENSION)
  		/* Suspension is kind of special case: not enough buffers */
@@ -178,7 +179,7 @@
  			"FW error resp error %d, details %d\n",
  			resp->error_info.error, resp->error_info.error_details);
  
---- orig/linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-csi2.h	2026-04-12 22:48:06.000000000 +0200
+--- /dev/fd/63	2026-06-04 18:18:32.422024803 +0200
 +++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-csi2.h	2026-06-01 09:45:28.992686208 +0200
 @@ -43,6 +43,7 @@
  	u32 receiver_errors;
@@ -188,8 +189,8 @@
  };
  
  struct ipu6_isys_csi2_timing {
---- orig/linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-csi2.c	2026-04-12 22:48:06.000000000 +0200
-+++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-csi2.c	2026-06-02 17:46:07.205081860 +0200
+--- /dev/fd/63	2026-06-04 18:18:54.622187525 +0200
++++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-csi2.c	2026-06-04 18:16:31.280606059 +0200
 @@ -247,6 +247,7 @@
  
  	cfg.port = csi2->port;
@@ -198,7 +199,15 @@
  
  	mask = isys->pdata->ipdata->csi2.irq_mask;
  	nports = isys->pdata->ipdata->csi2.nports;
-@@ -325,13 +326,16 @@
+@@ -291,6 +292,7 @@
+ 		       (isys->pdata->ipdata->csi2.fw_access_port_ofs, i));
+ 	}
+ 
++
+ 	/* enable all error related irq */
+ 	writel(mask,
+ 	       csi2->base + CSI_PORT_REG_BASE_IRQ_CSI +
+@@ -325,13 +327,16 @@
  	       CSI_PORT_REG_BASE_IRQ_ENABLE_OFFSET);
  
  	/* configure to enable FE and PPI2CSI */
@@ -217,7 +226,7 @@
  	writel(1, csi2->base + CSI_REG_PPI2CSI_ENABLE);
  	writel(1, csi2->base + CSI_REG_CSI_FE_ENABLE);
  
-@@ -340,6 +344,12 @@
+@@ -340,6 +345,12 @@
  		dev_err(dev, "csi-%d phy power up failed %d\n", csi2->port,
  			ret);
  
@@ -230,3 +239,13 @@
  	return ret;
  }
  
+--- /dev/fd/63	2026-06-04 18:19:45.271432345 +0200
++++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-platform-isys-csi2-reg.h	2026-06-01 22:32:45.079697045 +0200
+@@ -46,6 +46,7 @@
+ #define CSI_REG_PPI2CSI_ENABLE				0x200
+ #define CSI_REG_PPI2CSI_CONFIG_PPI_INTF			0x204
+ #define PPI_INTF_CONFIG_NOF_ENABLED_DLANES_MASK		GENMASK(4, 3)
++#define PPI_INTF_CONFIG_PHY_TYPE_MASK			BIT(0)
+ #define CSI_REG_PPI2CSI_CONFIG_CSI_FEATURE		0x208
+ 
+ enum CSI_PPI2CSI_CTRL {
