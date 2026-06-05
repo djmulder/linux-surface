@@ -1,5 +1,5 @@
---- /dev/fd/63	2026-06-04 22:53:11.164048188 +0200
-+++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-dwc-phy.c	2026-06-02 23:30:58.630798097 +0200
+--- /dev/fd/63	2026-06-05 09:43:44.524639704 +0200
++++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-dwc-phy.c	2026-06-05 09:32:58.950639796 +0200
 @@ -206,6 +206,7 @@
  	if (ret)
  		dev_err(dev, "Dphy %d power up failed, state 0x%x", phy_id,
@@ -112,8 +112,8 @@
  	/* only port 0, 2 and 4 support 4 lanes */
  	if (nlanes == 4 && port % 2) {
  		dev_err(dev, "invalid csi-port %u with %u lanes\n", port,
---- /dev/fd/63	2026-06-04 22:53:30.385237155 +0200
-+++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys.h	2026-06-01 09:45:28.991621419 +0200
+--- /dev/fd/63	2026-06-05 09:44:07.149858931 +0200
++++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys.h	2026-06-05 09:32:58.950991201 +0200
 @@ -95,6 +95,7 @@
  struct ipu6_isys_csi2_config {
  	u32 nlanes;
@@ -122,8 +122,8 @@
  };
  
  struct sensor_async_sd {
---- /dev/fd/63	2026-06-04 22:53:49.957428850 +0200
-+++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys.c	2026-06-04 22:35:10.810055685 +0200
+--- /dev/fd/63	2026-06-05 09:44:33.389352561 +0200
++++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys.c	2026-06-05 09:32:58.951220545 +0200
 @@ -132,7 +132,7 @@
  	}
  
@@ -179,8 +179,8 @@
  			"FW error resp error %d, details %d\n",
  			resp->error_info.error, resp->error_info.error_details);
  
---- /dev/fd/63	2026-06-04 22:54:08.981611519 +0200
-+++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-csi2.h	2026-06-01 09:45:28.992686208 +0200
+--- /dev/fd/63	2026-06-05 09:44:56.016024357 +0200
++++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-csi2.h	2026-06-05 09:32:58.951438212 +0200
 @@ -43,6 +43,7 @@
  	u32 receiver_errors;
  	unsigned int nlanes;
@@ -189,8 +189,8 @@
  };
  
  struct ipu6_isys_csi2_timing {
---- /dev/fd/63	2026-06-04 22:54:28.061794727 +0200
-+++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-csi2.c	2026-06-04 18:16:31.280606059 +0200
+--- /dev/fd/63	2026-06-05 09:45:19.635349493 +0200
++++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-isys-csi2.c	2026-06-05 09:32:58.951580685 +0200
 @@ -247,6 +247,7 @@
  
  	cfg.port = csi2->port;
@@ -239,8 +239,8 @@
  	return ret;
  }
  
---- /dev/fd/63	2026-06-04 22:54:47.295979413 +0200
-+++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-platform-isys-csi2-reg.h	2026-06-01 22:32:45.079697045 +0200
+--- /dev/fd/63	2026-06-05 09:45:40.156582809 +0200
++++ linux-source-7.0.0/drivers/media/pci/intel/ipu6/ipu6-platform-isys-csi2-reg.h	2026-06-05 09:32:58.951753980 +0200
 @@ -46,6 +46,7 @@
  #define CSI_REG_PPI2CSI_ENABLE				0x200
  #define CSI_REG_PPI2CSI_CONFIG_PPI_INTF			0x204
