@@ -1101,15 +1101,14 @@ Patchset: cameras
 
 diff --git a/drivers/media/i2c/imx681.c b/drivers/media/i2c/imx681.c
 new file mode 100644
-index 0000000..0459085
 --- /dev/null
 +++ b/drivers/media/i2c/imx681.c
-@@ -0,0 +1,895 @@
+@@ -0,0 +1,1073 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Sony IMX681 CMOS Image Sensor Driver
 + *
-+ * Front camera on Surface Pro 10 (Intel/Meteor Lake) and Surface Pro 11 (Intel/Lunar Lake).
++ * Front camera on Surface Pro 11 Business (Intel/Lunar Lake).
 + * Register sequences reverse-engineered from Windows I2C traces.
 + *
 + * Copyright (C) 2025
@@ -1167,8 +1166,8 @@ index 0000000..0459085
 +#define IMX681_REG_FRAME_LENGTH		CCI_REG24(0x033D)
 +
 +/* Image dimensions — native sensor output */
-+#define IMX681_WIDTH			3844
-+#define IMX681_HEIGHT			2640
++#define IMX681_WIDTH			1920
++#define IMX681_HEIGHT			1320
 +#define IMX681_LINE_LENGTH_PCK		7552	/* 0x1D80 */
 +#define IMX681_FRAME_LENGTH_LINES	3177	/* 0x0C69 */
 +#define IMX681_FRAME_LENGTH_MAX		0xFFFF	/* 24-bit reg, limit to 16-bit */
@@ -1211,9 +1210,13 @@ index 0000000..0459085
 +	/* Vendor specific configuration */
 +	{ CCI_REG16(0x002C), 0x0505 },
 +	/* CSI-2 signaling mode */
-+	{ CCI_REG8(0x0111),  0x02 },
++	{ CCI_REG8(0x0111),  0x02 }, /* CSI-2 D-PHY signalling mode */
++	/* CSI data format: RAW10 */
++	{ CCI_REG16(0x0112), 0x0A0A },
++	/* CSI lane mode: 2 lanes */
++	{ CCI_REG8(0x0114),  0x01 },
 +	/* Image orientation: H-flip to match Windows AIQB (RGGB native → GRBG) */
-+	{ CCI_REG8(0x0101),  0x01 },
++	{ CCI_REG8(0x0101),  0x00 },
 +	/* Vendor access unlock sequence */
 +	{ CCI_REG8(0x30EB),  0x05 },
 +	{ CCI_REG8(0x30EB),  0x0C },
@@ -1222,22 +1225,35 @@ index 0000000..0459085
 +	{ CCI_REG16(0x3532), 0xFFFF },
 +	/* LINE_LENGTH_PCK = 7552 */
 +	{ CCI_REG16(0x0342), 0x1D80 },
-+	/* Frame length = 3177 */
++	/* Frame length = 3177 — Sony vendor register */
 +	{ CCI_REG16(0x033E), 0x0C69 },
++	/* Frame length = 3177 — CCS-standard register (was 0, sensor may use this for MIPI timing) */
++	{ CCI_REG16(0x0340), 0x0C69 }, /* Frame length = 3177 */
 +	/* Crop window start: X_ADD_STA[7:0]=100, Y_ADD_STA=256 */
 +	{ CCI_REG24(0x0345), 0x640100 },
 +	/* Crop window end: X_ADD_END[7:0]=103, Y_ADD_END=2895 */
-+	{ CCI_REG24(0x0349), 0x670B4F },
++	{ CCI_REG24(0x0349), 0x670B4F }, /* Crop window end: X_ADD_END[7:0]=103, Y_ADD_END=2895 */
 +	/* Digital crop / vendor config */
-+	{ CCI_REG24(0x040D), 0x040A50 },
++	/* Digital crop: explicit write of all 8 registers to known-good values */
++	{ CCI_REG8(0x0408),  0x00 }, /* DIG_CROP_X_OFFSET high = 0 */
++	{ CCI_REG8(0x0409),  0x00 }, /* DIG_CROP_X_OFFSET low  = 0 */
++	{ CCI_REG8(0x040A),  0x00 }, /* DIG_CROP_Y_OFFSET high = 0 */
++	{ CCI_REG8(0x040B),  0x00 }, /* DIG_CROP_Y_OFFSET low  = 0 */
++	{ CCI_REG8(0x040C),  0x07 }, /* DIG_CROP_WIDTH high = 0x07 */
++	{ CCI_REG8(0x040D),  0x80 }, /* DIG_CROP_WIDTH low = 0x80 (1920) */
++	{ CCI_REG8(0x040E),  0x05 }, /* DIG_CROP_HEIGHT high = 0x05 */
++	{ CCI_REG8(0x040F),  0x28 }, /* DIG_CROP_HEIGHT low = 0x28 (1320) */
++	/* 2x2 binning */
++	{ CCI_REG8(0x0900),  0x01 }, /* BINNING_MODE = 1 (enable) */
++	{ CCI_REG8(0x0901),  0x22 }, /* BINNING_TYPE = 0x22 (2x2) */
 +	/* X_OUTPUT_SIZE=3844, Y_OUTPUT_SIZE=2640 */
-+	{ CCI_REG32(0x034C), 0x0F040A50 },
++	{ CCI_REG32(0x034C), 0x07800528 }, /* X_OUTPUT_SIZE=1920, Y=1320 (2x2 binned) */
 +	/* PLL multiplier = 225 */
 +	{ CCI_REG8(0x0307),  0x77 },
 +	/* PLL2: pre_div=3, multiplier=303 (0x012F) */
 +	{ CCI_REG24(0x030D), 0x030077 },
 +	/* Frame duration initial */
-+	{ CCI_REG16(0x022A), 0x0C61 },
++	{ CCI_REG16(0x022A), 0x01F4 },
 +	/* Vendor specific registers */
 +	{ CCI_REG8(0x7E9B),  0x02 },
 +	{ CCI_REG8(0x0368),  0x00 },
@@ -1251,9 +1267,9 @@ index 0000000..0459085
 +static const struct cci_reg_sequence imx681_first_exposure[] = {
 +	{ CCI_REG8(0x0104),  0x01 },		/* Group hold ON */
 +	{ CCI_REG24(0x033D), 0x000C69 },	/* Frame length = 3177 */
-+	{ CCI_REG24(0x0229), 0x000773 },	/* Exposure = 1907 lines */
-+	{ CCI_REG16(0x0204), 0x0000 },		/* Analog gain = 0 (1x) */
-+	{ CCI_REG16(0x020E), 0x0100 },		/* Digital gain = 1.0x */
++	{ CCI_REG24(0x0229), 0x0001F4 },	/* Exposure = 500 lines */
++	{ CCI_REG16(0x0204), 0x0020 },		/* Analog gain = 32 (low) */
++	{ CCI_REG16(0x020E), 0x0400 },		/* Digital gain = 4.0x */
 +	{ CCI_REG8(0x0104),  0x00 },		/* Group hold OFF */
 +};
 +
@@ -1266,7 +1282,7 @@ index 0000000..0459085
 +};
 +
 +static const u32 imx681_mbus_codes[] = {
-+	MEDIA_BUS_FMT_SGRBG10_1X10,
++	MEDIA_BUS_FMT_SRGGB10_1X10,
 +};
 +
 +/* Regulator supplies */
@@ -1448,7 +1464,7 @@ index 0000000..0459085
 +	format = v4l2_subdev_state_get_format(state, IMAGE_PAD);
 +	format->width = IMX681_WIDTH;
 +	format->height = IMX681_HEIGHT;
-+	format->code = MEDIA_BUS_FMT_SGRBG10_1X10;
++	format->code = MEDIA_BUS_FMT_SRGGB10_1X10;
 +	format->field = V4L2_FIELD_NONE;
 +	format->colorspace = V4L2_COLORSPACE_RAW;
 +	format->ycbcr_enc = V4L2_YCBCR_ENC_601;
@@ -1504,6 +1520,8 @@ index 0000000..0459085
 +{
 +	int ret;
 +
++	dev_info(imx681->dev, "starting stream: %dx%d RAW10 2-lane\n",
++		IMX681_WIDTH, IMX681_HEIGHT);
 +
 +	/* Write init register sequence */
 +	ret = cci_multi_reg_write(imx681->cci, imx681_init_regs,
@@ -1514,6 +1532,72 @@ index 0000000..0459085
 +	}
 +
 +	dev_dbg(imx681->dev, "init registers written successfully\n");
++
++	/* DIAGNOSTIC: read CHIP_ID, CSI mode, and all frame geometry registers */
++	{
++		u64 id_msb = 0, id_lsb = 0, csi_mode = 0;
++		u64 y_sta_h = 0, y_sta_l = 0, y_end_h = 0, y_end_l = 0;
++		u64 x_out_h = 0, x_out_l = 0, y_out_h = 0, y_out_l = 0, fll_h = 0, fll_l = 0;
++		u64 llp_h = 0, llp_l = 0;
++		u64 dc_w_h = 0, dc_w_l = 0, dc_h_h = 0, dc_h_l = 0;
++		u64 v300a_h = 0, v300a_l = 0, v3532_h = 0, v3532_l = 0;
++		u64 reg0368_h = 0, reg0368_l = 0;
++		int rc;
++		rc  = cci_read(imx681->cci, CCI_REG8(0x0016), &id_msb, NULL);
++		rc |= cci_read(imx681->cci, CCI_REG8(0x0017), &id_lsb, NULL);
++		rc |= cci_read(imx681->cci, CCI_REG8(0x0111), &csi_mode, NULL);
++		dev_info(imx681->dev, "imx681 CHIP_ID=0x%02llx%02llx CSI_SIGNALLING_MODE=0x%02llx (rc=%d)\n",
++			 id_msb, id_lsb, csi_mode, rc);
++		/* Frame geometry readback */
++		cci_read(imx681->cci, CCI_REG8(0x0346), &y_sta_h, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0347), &y_sta_l, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x034A), &y_end_h, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x034B), &y_end_l, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x034C), &x_out_h, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x034D), &x_out_l, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x034E), &y_out_h, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x034F), &y_out_l, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0340), &fll_h, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0341), &fll_l, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0342), &llp_h, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0343), &llp_l, NULL);
++		dev_info(imx681->dev,
++			 "imx681 Y_ADDR_START=0x%02llx%02llx Y_ADDR_END=0x%02llx%02llx X_OUT=0x%02llx%02llx Y_OUT=0x%02llx%02llx FLL=0x%02llx%02llx LLP=0x%02llx%02llx\n",
++			 y_sta_h, y_sta_l, y_end_h, y_end_l,
++			 x_out_h, x_out_l, y_out_h, y_out_l, fll_h, fll_l, llp_h, llp_l);
++		/* Digital crop registers */
++		u64 dc_y_off_h = 0, dc_y_off_l = 0;
++		cci_read(imx681->cci, CCI_REG8(0x040A), &dc_y_off_h, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x040B), &dc_y_off_l, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x040C), &dc_w_h, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x040D), &dc_w_l, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x040E), &dc_h_h, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x040F), &dc_h_l, NULL);
++		u64 d00=0, d01=0, d02=0, d03=0, d04=0, d05=0, d06=0, d07=0;
++		cci_read(imx681->cci, CCI_REG8(0x0D00), &d00, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0D01), &d01, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0D02), &d02, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0D03), &d03, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0D04), &d04, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0D05), &d05, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0D06), &d06, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0D07), &d07, NULL);
++		dev_info(imx681->dev,
++			 "imx681 0x0D00-07: %02llx %02llx %02llx %02llx %02llx %02llx %02llx %02llx\n",
++			 d00, d01, d02, d03, d04, d05, d06, d07);
++		/* Vendor-specific registers */
++		cci_read(imx681->cci, CCI_REG8(0x300A), &v300a_h, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x300B), &v300a_l, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x3532), &v3532_h, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x3533), &v3532_l, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0368), &reg0368_h, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0369), &reg0368_l, NULL);
++		dev_info(imx681->dev,
++			 "imx681 DIG_CROP_Y_OFF=0x%02llx%02llx DIG_CROP_W=0x%02llx%02llx DIG_CROP_H=0x%02llx%02llx 0x300A=0x%02llx%02llx 0x3532=0x%02llx%02llx 0x0368=0x%02llx%02llx\n",
++			 dc_y_off_h, dc_y_off_l, dc_w_h, dc_w_l, dc_h_h, dc_h_l,
++			 v300a_h, v300a_l, v3532_h, v3532_l,
++			 reg0368_h, reg0368_l);
++	}
 +
 +	/* Wait for sensor to stabilise after configuration */
 +	usleep_range(IMX681_INIT_DELAY_US, IMX681_INIT_DELAY_US + 1000);
@@ -1533,6 +1617,17 @@ index 0000000..0459085
 +		return ret;
 +	}
 +
++	/* FORCE high exposure+gain with group hold, try both 0x0229 and CCS 0x0202 */
++	{
++		int fret = 0;
++		cci_write(imx681->cci, IMX681_REG_GROUP_HOLD, 0x01, NULL);
++		fret |= cci_write(imx681->cci, CCI_REG16(0x0340), 3177, NULL); /* CCS FLL */
++		fret |= cci_write(imx681->cci, IMX681_REG_EXPOSURE, 500, NULL);
++		fret |= cci_write(imx681->cci, IMX681_REG_ANALOG_GAIN, 0x0020, NULL); /* low gain */
++		fret |= cci_write(imx681->cci, IMX681_REG_DIGITAL_GAIN, 0x0100, NULL); /* 1x dgain */
++		cci_write(imx681->cci, IMX681_REG_GROUP_HOLD, 0x00, NULL);
++		dev_info(imx681->dev, "forced FLL=3177 exp=500 gain=0x20 ret=%d\n", fret);
++	}
 +	/* Start streaming */
 +	ret = cci_write(imx681->cci, IMX681_REG_MODE_SELECT,
 +			IMX681_MODE_STREAMING, NULL);
@@ -1541,6 +1636,86 @@ index 0000000..0459085
 +		return ret;
 +	}
 +
++	/* DIAGNOSTIC: read embedded data and MIPI config registers */
++	{
++		u64 ebd_0=0,ebd_1=0,ebd_2=0,ebd_3=0,ebd_4=0,ebd_5=0;
++		u64 r3002=0,r3004=0,r3006=0,r0114=0,r0112=0;
++		cci_read(imx681->cci, CCI_REG8(0x3A00), &ebd_0, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x3A01), &ebd_1, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x3A02), &ebd_2, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x3A03), &ebd_3, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x3A04), &ebd_4, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x3A05), &ebd_5, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x3002), &r3002, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x3004), &r3004, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x3006), &r3006, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0112), &r0112, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0114), &r0114, NULL);
++		dev_info(imx681->dev, "EBD: 0x3A00-05=%02llx %02llx %02llx %02llx %02llx %02llx 0x3002=%02llx 0x3004=%02llx 0x3006=%02llx CSI_DT=0x%02llx LANES=0x%02llx\n",
++			ebd_0,ebd_1,ebd_2,ebd_3,ebd_4,ebd_5,r3002,r3004,r3006,r0112,r0114);
++	}
++	/* DIAGNOSTIC: binning and array geometry */
++	{
++		u64 xas_h=0,xas_l=0,xae_h=0,xae_l=0,bm=0,bt=0,ss_mode=0;
++		cci_read(imx681->cci, CCI_REG8(0x0344), &xas_h, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0345), &xas_l, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0348), &xae_h, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0349), &xae_l, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0900), &bm, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0901), &bt, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0390), &ss_mode, NULL);
++		dev_info(imx681->dev, "ARRAY: X_START=0x%02llx%02llx X_END=0x%02llx%02llx BINNING_MODE=0x%02llx BINNING_TYPE=0x%02llx SUB_SAMPLE=0x%02llx\n",
++			xas_h,xas_l,xae_h,xae_l,bm,bt,ss_mode);
++	}
++	dev_info(imx681->dev, "streaming started\n");
++
++	/* DIAGNOSTIC: read back exposure/gain registers to verify writes stuck */
++	{
++		u64 exp_hi=0, exp_mid=0, exp_lo=0, gain=0, gain_alt=0, dgain=0;
++		u64 exp_ccs_hi=0, exp_ccs_mid=0;
++		cci_read(imx681->cci, CCI_REG8(0x0229), &exp_hi, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x022A), &exp_mid, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x022B), &exp_lo, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0202), &exp_ccs_hi, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0203), &exp_ccs_mid, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0204), &gain, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x0205), &gain_alt, NULL);
++		cci_read(imx681->cci, CCI_REG8(0x020E), &dgain, NULL);
++		dev_info(imx681->dev,
++			 "regcheck: 0x0229=%02llx%02llx%02llx 0x0202=%02llx%02llx gain=0x%02llx%02llx dgain=0x%02llx\n",
++			 exp_hi, exp_mid, exp_lo, exp_ccs_hi, exp_ccs_mid, gain, gain_alt, dgain);
++		{
++			u64 p0=0,p1=0,p2=0,p3=0,p4=0,p5=0,p6=0,p7=0,p8=0;
++			cci_read(imx681->cci, CCI_REG8(0x0301), &p0, NULL); /* IVTPXCK_DIV */
++			cci_read(imx681->cci, CCI_REG8(0x0303), &p1, NULL); /* IVTSYCK_DIV */
++			cci_read(imx681->cci, CCI_REG8(0x0305), &p2, NULL); /* PREPLLCK_VT_DIV */
++			cci_read(imx681->cci, CCI_REG8(0x0306), &p3, NULL); /* PLL_VT_MPY hi */
++			cci_read(imx681->cci, CCI_REG8(0x0307), &p4, NULL); /* PLL_VT_MPY lo */
++			cci_read(imx681->cci, CCI_REG8(0x030B), &p5, NULL); /* IOPPXCK_DIV */
++			cci_read(imx681->cci, CCI_REG8(0x030D), &p6, NULL); /* PREPLLCK_OP_DIV */
++			cci_read(imx681->cci, CCI_REG8(0x030E), &p7, NULL); /* PLL_OP_MPY hi */
++			cci_read(imx681->cci, CCI_REG8(0x030F), &p8, NULL); /* PLL_OP_MPY lo */
++			dev_info(imx681->dev,
++				 "pll: 0301=%02llx 0303=%02llx 0305=%02llx 0306=%02llx 0307=%02llx 030B=%02llx 030D=%02llx 030E=%02llx 030F=%02llx\n",
++				 p0,p1,p2,p3,p4,p5,p6,p7,p8);
++		}
++	}
++	/* DIAGNOSTIC: confirm streaming command stuck and sensor is emitting frames */
++	{
++		u64 mode = 0, fcnt0 = 0, fcnt1 = 0;
++		int rc;
++		rc = cci_read(imx681->cci, CCI_REG8(0x0100), &mode, NULL);
++		rc |= cci_read(imx681->cci, CCI_REG8(0x0005), &fcnt0, NULL);
++		msleep(200);
++		rc |= cci_read(imx681->cci, CCI_REG8(0x0005), &fcnt1, NULL);
++		msleep(500);
++		{
++			u64 fcnt2 = 0;
++			cci_read(imx681->cci, CCI_REG8(0x0005), &fcnt2, NULL);
++			dev_info(imx681->dev, "imx681 MODE_SEL=0x%02llx FRAME_CNT t=0:0x%02llx t=200ms:0x%02llx t=700ms:0x%02llx (rc=%d)\n",
++				 mode, fcnt0, fcnt1, fcnt2, rc);
++		}
++	}
 +	return 0;
 +}
 +
@@ -1560,6 +1735,7 @@ index 0000000..0459085
 +				 struct v4l2_subdev_state *state,
 +				 u32 pad, u64 streams_mask)
 +{
++	dev_info(sd->dev, "enable_streams called pad=%d mask=0x%llx\n", pad, streams_mask);
 +	struct imx681 *imx681 = to_imx681(sd);
 +	int ret;
 +
@@ -1573,6 +1749,7 @@ index 0000000..0459085
 +	}
 +
 +	ret = imx681_start_streaming(imx681);
++	dev_info(sd->dev, "start_streaming returned %d\n", ret);
 +	if (ret)
 +		pm_runtime_put_autosuspend(imx681->dev);
 +
@@ -1778,7 +1955,7 @@ index 0000000..0459085
 +{
 +	struct fwnode_handle *fwnode = dev_fwnode(imx681->dev);
 +	struct v4l2_fwnode_endpoint bus_cfg = {
-+		.bus_type = V4L2_MBUS_CSI2_CPHY,
++		.bus_type = V4L2_MBUS_CSI2_DPHY,
 +	};
 +	struct fwnode_handle *ep;
 +	int ret;
@@ -1786,14 +1963,14 @@ index 0000000..0459085
 +	ep = fwnode_graph_get_next_endpoint(fwnode, NULL);
 +	if (!ep) {
 +		dev_err(imx681->dev, "no endpoint found in firmware node\n");
-+		return -EPROBE_DEFER;
++		return -ENXIO;
 +	}
 +
 +	ret = v4l2_fwnode_endpoint_alloc_parse(ep, &bus_cfg);
 +	fwnode_handle_put(ep);
 +	if (ret) {
-+		dev_dbg(imx681->dev, "endpoint parse failed (%d), deferring\n", ret);
-+		return EPROBE_DEFER;
++		dev_err(imx681->dev, "failed to parse endpoint: %d\n", ret);
++		return ret;
 +	}
 +
 +	if (bus_cfg.bus.mipi_csi2.num_data_lanes != IMX681_NUM_LANES) {
@@ -2000,33 +2177,6 @@ index 0000000..0459085
 +MODULE_DESCRIPTION("Sony IMX681 CMOS Image Sensor Driver");
 +MODULE_AUTHOR("Andre Gilerson <andre.gilerson@gmail.com>");
 +MODULE_LICENSE("GPL");
--- 
-2.53.0
-
-
-From 6d3417b5fff9e0d6a8aabf260756bf2ae5daa5d1 Mon Sep 17 00:00:00 2001
-From: "D.J. Mulder" <djmulder@example.com>
-Date: Fri, 29 May 2026 15:57:33 +0200
-Subject: [PATCH 2/5] media: ipu-bridge: Add Surface Pro 10 camera sensor
- support
-
-Add sensor table entries and support for cameras on the Microsoft
-Surface Pro 10 (Meteor Lake / IPU6EP-MTL):
-
-- Add SONY0681 (IMX681 front camera) with C-PHY bus type and dual
-  link frequencies (380.8 MHz for SP10/MTL, 969.6 MHz for SP11/LNL)
-- Add OVTID858 (OV13858 rear camera) with 4-lane D-PHY at 540 MHz
-- Add OVTI5675 sensor entry
-- Add device_reprobe() call after fwnode attachment to fix probe
-  ordering race condition
-- Add C-PHY bus type selection via IPU_SENSOR_CONFIG_CPHY macro
-- Add DMI quirk entries for XPS 13 9340 and XPS 14 9440
-
-Patchset: cameras
----
- drivers/media/pci/intel/ipu-bridge.c | 84 ++++++++++++++++++++++++----
- 1 file changed, 74 insertions(+), 10 deletions(-)
-
 diff --git a/drivers/media/pci/intel/ipu-bridge.c b/drivers/media/pci/intel/ipu-bridge.c
 index a986e30..3aaea3b 100644
 --- a/drivers/media/pci/intel/ipu-bridge.c
@@ -2079,7 +2229,7 @@ index a986e30..3aaea3b 100644
 +	/* OmniVision OV13858 - Microsoft Surface Pro 10 rear camera */
 +	IPU_SENSOR_CONFIG("OVTID858", 4, 540000000),
 +	/* Sony IMX681 - Surface Pro 10 */
-+        IPU_SENSOR_CONFIG_CPHY("SONY0681", 1, 380800000),
++        IPU_SENSOR_CONFIG("SONY0681", 1, 380800000),
 +};
 +
 +/*
