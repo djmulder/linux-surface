@@ -1103,7 +1103,7 @@ diff --git a/drivers/media/i2c/imx681.c b/drivers/media/i2c/imx681.c
 new file mode 100644
 --- /dev/null
 +++ b/drivers/media/i2c/imx681.c
-@@ -0,0 +1,1073 @@
+@@ -0,0 +1,915 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Sony IMX681 CMOS Image Sensor Driver
@@ -1216,7 +1216,7 @@ new file mode 100644
 +	/* CSI lane mode: 2 lanes */
 +	{ CCI_REG8(0x0114),  0x01 },
 +	/* Image orientation: H-flip to match Windows AIQB (RGGB native → GRBG) */
-+	{ CCI_REG8(0x0101),  0x00 },
++	{ CCI_REG8(0x0101),  0x03 },
 +	/* Vendor access unlock sequence */
 +	{ CCI_REG8(0x30EB),  0x05 },
 +	{ CCI_REG8(0x30EB),  0x0C },
@@ -1533,71 +1533,6 @@ new file mode 100644
 +
 +	dev_dbg(imx681->dev, "init registers written successfully\n");
 +
-+	/* DIAGNOSTIC: read CHIP_ID, CSI mode, and all frame geometry registers */
-+	{
-+		u64 id_msb = 0, id_lsb = 0, csi_mode = 0;
-+		u64 y_sta_h = 0, y_sta_l = 0, y_end_h = 0, y_end_l = 0;
-+		u64 x_out_h = 0, x_out_l = 0, y_out_h = 0, y_out_l = 0, fll_h = 0, fll_l = 0;
-+		u64 llp_h = 0, llp_l = 0;
-+		u64 dc_w_h = 0, dc_w_l = 0, dc_h_h = 0, dc_h_l = 0;
-+		u64 v300a_h = 0, v300a_l = 0, v3532_h = 0, v3532_l = 0;
-+		u64 reg0368_h = 0, reg0368_l = 0;
-+		int rc;
-+		rc  = cci_read(imx681->cci, CCI_REG8(0x0016), &id_msb, NULL);
-+		rc |= cci_read(imx681->cci, CCI_REG8(0x0017), &id_lsb, NULL);
-+		rc |= cci_read(imx681->cci, CCI_REG8(0x0111), &csi_mode, NULL);
-+		dev_info(imx681->dev, "imx681 CHIP_ID=0x%02llx%02llx CSI_SIGNALLING_MODE=0x%02llx (rc=%d)\n",
-+			 id_msb, id_lsb, csi_mode, rc);
-+		/* Frame geometry readback */
-+		cci_read(imx681->cci, CCI_REG8(0x0346), &y_sta_h, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0347), &y_sta_l, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x034A), &y_end_h, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x034B), &y_end_l, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x034C), &x_out_h, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x034D), &x_out_l, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x034E), &y_out_h, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x034F), &y_out_l, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0340), &fll_h, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0341), &fll_l, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0342), &llp_h, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0343), &llp_l, NULL);
-+		dev_info(imx681->dev,
-+			 "imx681 Y_ADDR_START=0x%02llx%02llx Y_ADDR_END=0x%02llx%02llx X_OUT=0x%02llx%02llx Y_OUT=0x%02llx%02llx FLL=0x%02llx%02llx LLP=0x%02llx%02llx\n",
-+			 y_sta_h, y_sta_l, y_end_h, y_end_l,
-+			 x_out_h, x_out_l, y_out_h, y_out_l, fll_h, fll_l, llp_h, llp_l);
-+		/* Digital crop registers */
-+		u64 dc_y_off_h = 0, dc_y_off_l = 0;
-+		cci_read(imx681->cci, CCI_REG8(0x040A), &dc_y_off_h, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x040B), &dc_y_off_l, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x040C), &dc_w_h, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x040D), &dc_w_l, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x040E), &dc_h_h, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x040F), &dc_h_l, NULL);
-+		u64 d00=0, d01=0, d02=0, d03=0, d04=0, d05=0, d06=0, d07=0;
-+		cci_read(imx681->cci, CCI_REG8(0x0D00), &d00, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0D01), &d01, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0D02), &d02, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0D03), &d03, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0D04), &d04, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0D05), &d05, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0D06), &d06, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0D07), &d07, NULL);
-+		dev_info(imx681->dev,
-+			 "imx681 0x0D00-07: %02llx %02llx %02llx %02llx %02llx %02llx %02llx %02llx\n",
-+			 d00, d01, d02, d03, d04, d05, d06, d07);
-+		/* Vendor-specific registers */
-+		cci_read(imx681->cci, CCI_REG8(0x300A), &v300a_h, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x300B), &v300a_l, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x3532), &v3532_h, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x3533), &v3532_l, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0368), &reg0368_h, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0369), &reg0368_l, NULL);
-+		dev_info(imx681->dev,
-+			 "imx681 DIG_CROP_Y_OFF=0x%02llx%02llx DIG_CROP_W=0x%02llx%02llx DIG_CROP_H=0x%02llx%02llx 0x300A=0x%02llx%02llx 0x3532=0x%02llx%02llx 0x0368=0x%02llx%02llx\n",
-+			 dc_y_off_h, dc_y_off_l, dc_w_h, dc_w_l, dc_h_h, dc_h_l,
-+			 v300a_h, v300a_l, v3532_h, v3532_l,
-+			 reg0368_h, reg0368_l);
-+	}
 +
 +	/* Wait for sensor to stabilise after configuration */
 +	usleep_range(IMX681_INIT_DELAY_US, IMX681_INIT_DELAY_US + 1000);
@@ -1617,104 +1552,12 @@ new file mode 100644
 +		return ret;
 +	}
 +
-+	/* FORCE high exposure+gain with group hold, try both 0x0229 and CCS 0x0202 */
-+	{
-+		int fret = 0;
-+		cci_write(imx681->cci, IMX681_REG_GROUP_HOLD, 0x01, NULL);
-+		fret |= cci_write(imx681->cci, CCI_REG16(0x0340), 3177, NULL); /* CCS FLL */
-+		fret |= cci_write(imx681->cci, IMX681_REG_EXPOSURE, 500, NULL);
-+		fret |= cci_write(imx681->cci, IMX681_REG_ANALOG_GAIN, 0x0020, NULL); /* low gain */
-+		fret |= cci_write(imx681->cci, IMX681_REG_DIGITAL_GAIN, 0x0100, NULL); /* 1x dgain */
-+		cci_write(imx681->cci, IMX681_REG_GROUP_HOLD, 0x00, NULL);
-+		dev_info(imx681->dev, "forced FLL=3177 exp=500 gain=0x20 ret=%d\n", fret);
-+	}
 +	/* Start streaming */
 +	ret = cci_write(imx681->cci, IMX681_REG_MODE_SELECT,
 +			IMX681_MODE_STREAMING, NULL);
 +	if (ret) {
 +		dev_err(imx681->dev, "failed to start streaming: %d\n", ret);
 +		return ret;
-+	}
-+
-+	/* DIAGNOSTIC: read embedded data and MIPI config registers */
-+	{
-+		u64 ebd_0=0,ebd_1=0,ebd_2=0,ebd_3=0,ebd_4=0,ebd_5=0;
-+		u64 r3002=0,r3004=0,r3006=0,r0114=0,r0112=0;
-+		cci_read(imx681->cci, CCI_REG8(0x3A00), &ebd_0, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x3A01), &ebd_1, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x3A02), &ebd_2, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x3A03), &ebd_3, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x3A04), &ebd_4, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x3A05), &ebd_5, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x3002), &r3002, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x3004), &r3004, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x3006), &r3006, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0112), &r0112, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0114), &r0114, NULL);
-+		dev_info(imx681->dev, "EBD: 0x3A00-05=%02llx %02llx %02llx %02llx %02llx %02llx 0x3002=%02llx 0x3004=%02llx 0x3006=%02llx CSI_DT=0x%02llx LANES=0x%02llx\n",
-+			ebd_0,ebd_1,ebd_2,ebd_3,ebd_4,ebd_5,r3002,r3004,r3006,r0112,r0114);
-+	}
-+	/* DIAGNOSTIC: binning and array geometry */
-+	{
-+		u64 xas_h=0,xas_l=0,xae_h=0,xae_l=0,bm=0,bt=0,ss_mode=0;
-+		cci_read(imx681->cci, CCI_REG8(0x0344), &xas_h, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0345), &xas_l, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0348), &xae_h, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0349), &xae_l, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0900), &bm, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0901), &bt, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0390), &ss_mode, NULL);
-+		dev_info(imx681->dev, "ARRAY: X_START=0x%02llx%02llx X_END=0x%02llx%02llx BINNING_MODE=0x%02llx BINNING_TYPE=0x%02llx SUB_SAMPLE=0x%02llx\n",
-+			xas_h,xas_l,xae_h,xae_l,bm,bt,ss_mode);
-+	}
-+	dev_info(imx681->dev, "streaming started\n");
-+
-+	/* DIAGNOSTIC: read back exposure/gain registers to verify writes stuck */
-+	{
-+		u64 exp_hi=0, exp_mid=0, exp_lo=0, gain=0, gain_alt=0, dgain=0;
-+		u64 exp_ccs_hi=0, exp_ccs_mid=0;
-+		cci_read(imx681->cci, CCI_REG8(0x0229), &exp_hi, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x022A), &exp_mid, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x022B), &exp_lo, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0202), &exp_ccs_hi, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0203), &exp_ccs_mid, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0204), &gain, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x0205), &gain_alt, NULL);
-+		cci_read(imx681->cci, CCI_REG8(0x020E), &dgain, NULL);
-+		dev_info(imx681->dev,
-+			 "regcheck: 0x0229=%02llx%02llx%02llx 0x0202=%02llx%02llx gain=0x%02llx%02llx dgain=0x%02llx\n",
-+			 exp_hi, exp_mid, exp_lo, exp_ccs_hi, exp_ccs_mid, gain, gain_alt, dgain);
-+		{
-+			u64 p0=0,p1=0,p2=0,p3=0,p4=0,p5=0,p6=0,p7=0,p8=0;
-+			cci_read(imx681->cci, CCI_REG8(0x0301), &p0, NULL); /* IVTPXCK_DIV */
-+			cci_read(imx681->cci, CCI_REG8(0x0303), &p1, NULL); /* IVTSYCK_DIV */
-+			cci_read(imx681->cci, CCI_REG8(0x0305), &p2, NULL); /* PREPLLCK_VT_DIV */
-+			cci_read(imx681->cci, CCI_REG8(0x0306), &p3, NULL); /* PLL_VT_MPY hi */
-+			cci_read(imx681->cci, CCI_REG8(0x0307), &p4, NULL); /* PLL_VT_MPY lo */
-+			cci_read(imx681->cci, CCI_REG8(0x030B), &p5, NULL); /* IOPPXCK_DIV */
-+			cci_read(imx681->cci, CCI_REG8(0x030D), &p6, NULL); /* PREPLLCK_OP_DIV */
-+			cci_read(imx681->cci, CCI_REG8(0x030E), &p7, NULL); /* PLL_OP_MPY hi */
-+			cci_read(imx681->cci, CCI_REG8(0x030F), &p8, NULL); /* PLL_OP_MPY lo */
-+			dev_info(imx681->dev,
-+				 "pll: 0301=%02llx 0303=%02llx 0305=%02llx 0306=%02llx 0307=%02llx 030B=%02llx 030D=%02llx 030E=%02llx 030F=%02llx\n",
-+				 p0,p1,p2,p3,p4,p5,p6,p7,p8);
-+		}
-+	}
-+	/* DIAGNOSTIC: confirm streaming command stuck and sensor is emitting frames */
-+	{
-+		u64 mode = 0, fcnt0 = 0, fcnt1 = 0;
-+		int rc;
-+		rc = cci_read(imx681->cci, CCI_REG8(0x0100), &mode, NULL);
-+		rc |= cci_read(imx681->cci, CCI_REG8(0x0005), &fcnt0, NULL);
-+		msleep(200);
-+		rc |= cci_read(imx681->cci, CCI_REG8(0x0005), &fcnt1, NULL);
-+		msleep(500);
-+		{
-+			u64 fcnt2 = 0;
-+			cci_read(imx681->cci, CCI_REG8(0x0005), &fcnt2, NULL);
-+			dev_info(imx681->dev, "imx681 MODE_SEL=0x%02llx FRAME_CNT t=0:0x%02llx t=200ms:0x%02llx t=700ms:0x%02llx (rc=%d)\n",
-+				 mode, fcnt0, fcnt1, fcnt2, rc);
-+		}
 +	}
 +	return 0;
 +}
@@ -1735,7 +1578,6 @@ new file mode 100644
 +				 struct v4l2_subdev_state *state,
 +				 u32 pad, u64 streams_mask)
 +{
-+	dev_info(sd->dev, "enable_streams called pad=%d mask=0x%llx\n", pad, streams_mask);
 +	struct imx681 *imx681 = to_imx681(sd);
 +	int ret;
 +
