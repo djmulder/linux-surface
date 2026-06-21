@@ -1216,7 +1216,7 @@ new file mode 100644
 +	/* CSI lane mode: 2 lanes */
 +	{ CCI_REG8(0x0114),  0x01 },
 +	/* Image orientation: H-flip to match Windows AIQB (RGGB native → GRBG) */
-+	{ CCI_REG8(0x0101),  0x03 },
++	{ CCI_REG8(0x0101),  0x01 },
 +	/* Vendor access unlock sequence */
 +	{ CCI_REG8(0x30EB),  0x05 },
 +	{ CCI_REG8(0x30EB),  0x0C },
@@ -1235,8 +1235,8 @@ new file mode 100644
 +	{ CCI_REG24(0x0349), 0x670B4F }, /* Crop window end: X_ADD_END[7:0]=103, Y_ADD_END=2895 */
 +	/* Digital crop / vendor config */
 +	/* Digital crop: explicit write of all 8 registers to known-good values */
-+	{ CCI_REG8(0x0408),  0x00 }, /* DIG_CROP_X_OFFSET high = 0 */
-+	{ CCI_REG8(0x0409),  0x00 }, /* DIG_CROP_X_OFFSET low  = 0 */
++	{ CCI_REG8(0x0408),  0x03 }, /* DIG_CROP_X_OFFSET high = 0x03 */
++	{ CCI_REG8(0x0409),  0xC2 }, /* DIG_CROP_X_OFFSET low = 0xC2 (962 = center crop) */
 +	{ CCI_REG8(0x040A),  0x00 }, /* DIG_CROP_Y_OFFSET high = 0 */
 +	{ CCI_REG8(0x040B),  0x00 }, /* DIG_CROP_Y_OFFSET low  = 0 */
 +	{ CCI_REG8(0x040C),  0x07 }, /* DIG_CROP_WIDTH high = 0x07 */
@@ -1253,7 +1253,7 @@ new file mode 100644
 +	/* PLL2: pre_div=3, multiplier=303 (0x012F) */
 +	{ CCI_REG24(0x030D), 0x030077 },
 +	/* Frame duration initial */
-+	{ CCI_REG16(0x022A), 0x01F4 },
++	{ CCI_REG16(0x022A), 0x05DC },
 +	/* Vendor specific registers */
 +	{ CCI_REG8(0x7E9B),  0x02 },
 +	{ CCI_REG8(0x0368),  0x00 },
@@ -1267,8 +1267,8 @@ new file mode 100644
 +static const struct cci_reg_sequence imx681_first_exposure[] = {
 +	{ CCI_REG8(0x0104),  0x01 },		/* Group hold ON */
 +	{ CCI_REG24(0x033D), 0x000C69 },	/* Frame length = 3177 */
-+	{ CCI_REG24(0x0229), 0x0001F4 },	/* Exposure = 500 lines */
-+	{ CCI_REG16(0x0204), 0x0020 },		/* Analog gain = 32 (low) */
++	{ CCI_REG24(0x0229), 0x0005DC },	/* Exposure = 1500 lines */
++	{ CCI_REG16(0x0204), 0x0080 },		/* Analog gain = 128 */
 +	{ CCI_REG16(0x020E), 0x0400 },		/* Digital gain = 4.0x */
 +	{ CCI_REG8(0x0104),  0x00 },		/* Group hold OFF */
 +};
@@ -1282,7 +1282,7 @@ new file mode 100644
 +};
 +
 +static const u32 imx681_mbus_codes[] = {
-+	MEDIA_BUS_FMT_SRGGB10_1X10,
++	MEDIA_BUS_FMT_SGRBG10_1X10,
 +};
 +
 +/* Regulator supplies */
@@ -1464,7 +1464,7 @@ new file mode 100644
 +	format = v4l2_subdev_state_get_format(state, IMAGE_PAD);
 +	format->width = IMX681_WIDTH;
 +	format->height = IMX681_HEIGHT;
-+	format->code = MEDIA_BUS_FMT_SRGGB10_1X10;
++	format->code = MEDIA_BUS_FMT_SGRBG10_1X10;
 +	format->field = V4L2_FIELD_NONE;
 +	format->colorspace = V4L2_COLORSPACE_RAW;
 +	format->ycbcr_enc = V4L2_YCBCR_ENC_601;
