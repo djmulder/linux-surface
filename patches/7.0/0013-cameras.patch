@@ -1103,7 +1103,7 @@ diff --git a/drivers/media/i2c/imx681.c b/drivers/media/i2c/imx681.c
 new file mode 100644
 --- /dev/null
 +++ b/drivers/media/i2c/imx681.c
-@@ -0,0 +1,915 @@
+@@ -0,0 +1,918 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Sony IMX681 CMOS Image Sensor Driver
@@ -1235,8 +1235,8 @@ new file mode 100644
 +	{ CCI_REG24(0x0349), 0x670B4F }, /* Crop window end: X_ADD_END=3943, Y_ADD_END=2895 */
 +	/* Digital crop / vendor config */
 +	/* Digital crop: explicit write of all 8 registers to known-good values */
-+	{ CCI_REG8(0x0408),  0x03 }, /* DIG_CROP_X_OFFSET high = 0x03 */
-+	{ CCI_REG8(0x0409),  0xC2 }, /* DIG_CROP_X_OFFSET low = 0xC2 (962 = center) */
++	{ CCI_REG8(0x0408),  0x00 }, /* DIG_CROP_X_OFFSET high = 0 */
++	{ CCI_REG8(0x0409),  0x01 }, /* DIG_CROP_X_OFFSET low = 1 (center 1922→1920) */
 +	{ CCI_REG8(0x040A),  0x00 }, /* DIG_CROP_Y_OFFSET high = 0 */
 +	{ CCI_REG8(0x040B),  0x00 }, /* DIG_CROP_Y_OFFSET low  = 0 */
 +	{ CCI_REG8(0x040C),  0x07 }, /* DIG_CROP_WIDTH high = 0x07 */
@@ -1246,6 +1246,9 @@ new file mode 100644
 +	/* 2x2 binning */
 +	{ CCI_REG8(0x0900),  0x01 }, /* BINNING_MODE = 1 (enable) */
 +	{ CCI_REG8(0x0901),  0x22 }, /* BINNING_TYPE = 0x22 (2x2) */
++	{ CCI_REG8(0x0401),  0x01 }, /* SCALE_MODE = 1 (enabled) */
++	{ CCI_REG16(0x0404), 0x0020 }, /* SCALE_M = 32 (16/32 = 0.5x horizontal) */
++	{ CCI_REG8(0x0902),  0x08 }, /* BINNING_WEIGHTING */
 +	/* X_OUTPUT_SIZE=3844, Y_OUTPUT_SIZE=2640 */
 +	{ CCI_REG32(0x034C), 0x07800528 }, /* X_OUTPUT_SIZE=1920, Y=1320 */
 +	/* PLL multiplier = 225 */
