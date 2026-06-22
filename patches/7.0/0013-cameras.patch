@@ -1103,7 +1103,7 @@ diff --git a/drivers/media/i2c/imx681.c b/drivers/media/i2c/imx681.c
 new file mode 100644
 --- /dev/null
 +++ b/drivers/media/i2c/imx681.c
-@@ -0,0 +1,920 @@
+@@ -0,0 +1,917 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Sony IMX681 CMOS Image Sensor Driver
@@ -1522,8 +1522,6 @@ new file mode 100644
 +{
 +	int ret;
 +
-+	dev_info(imx681->dev, "starting stream: %dx%d RAW10 2-lane\n",
-+		IMX681_WIDTH, IMX681_HEIGHT);
 +
 +	/* Write init register sequence */
 +	ret = cci_multi_reg_write(imx681->cci, imx681_init_regs,
@@ -1596,7 +1594,6 @@ new file mode 100644
 +	}
 +
 +	ret = imx681_start_streaming(imx681);
-+	dev_info(sd->dev, "start_streaming returned %d\n", ret);
 +	if (ret)
 +		pm_runtime_put_autosuspend(imx681->dev);
 +
