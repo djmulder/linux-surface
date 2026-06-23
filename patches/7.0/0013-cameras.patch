@@ -1245,7 +1245,7 @@ new file mode 100644
 +	/* 2x2 binning */
 +	{ CCI_REG8(0x0900),  0x01 }, /* BINNING_MODE = 1 (enable) */
 +	{ CCI_REG8(0x0901),  0x22 }, /* BINNING_TYPE = 0x22 (2x2) */
-+	{ CCI_REG8(0x0401),  0x00 }, /* SCALE_MODE = 0 (disabled — incompatible with v_flip) */
++	{ CCI_REG8(0x0401),  0x01 }, /* SCALE_MODE = 1 (horizontal scaler enabled) */
 +	{ CCI_REG16(0x0404), 0x0020 }, /* SCALE_M = 32 (0.5x horizontal) */
 +	{ CCI_REG8(0x0902),  0x08 }, /* BINNING_WEIGHTING */
 +	/* X_OUTPUT_SIZE=3844, Y_OUTPUT_SIZE=2640 */
