@@ -1062,6 +1062,13 @@ index f5456330b..3418ff475 100644
 +		},
 +		.driver_data = "OVTID858",
 +	},
++	{
++		.matches = {
++			DMI_MATCH(DMI_SYS_VENDOR, "Microsoft Corporation"),
++			DMI_MATCH(DMI_PRODUCT_NAME, "Surface Pro 10 for Business"),
++		},
++		.driver_data = "SONY0681",
++	},
  	{} /* Terminating entry */
  };
  
@@ -1700,6 +1707,11 @@ new file mode 100644
 +	}
 +
 +	if (val != IMX681_CHIP_ID) {
++		/* If sensor returns 0, it's not powered yet — defer probe */
++		if (val == 0) {
++			dev_dbg(imx681->dev, "chip ID 0x0000, sensor not ready, deferring\n");
++			return -EPROBE_DEFER;
++		}
 +		dev_err(imx681->dev, "chip ID mismatch: 0x%04llx != 0x%04x\n",
 +			val, IMX681_CHIP_ID);
 +		return -EIO;
@@ -2119,9 +2131,12 @@ index a986e30..3aaea3b 100644
  {
 +	const struct dmi_system_id *dmi_id;
 +
-+	dmi_id = dmi_first_match(upside_down_sensor_dmi_ids);
-+	if (dmi_id && acpi_dev_hid_match(adev, dmi_id->driver_data))
-+		return 180;
++	for (dmi_id = upside_down_sensor_dmi_ids; dmi_id->matches[0].slot; dmi_id++) {
++		if (dmi_match(dmi_id->matches[0].slot, dmi_id->matches[0].substr) &&
++		    dmi_match(dmi_id->matches[1].slot, dmi_id->matches[1].substr) &&
++		    acpi_dev_hid_match(adev, dmi_id->driver_data))
++			return 180;
++	}
 +
  	switch (ssdb->degree) {
  	case IPU_SENSOR_ROTATION_NORMAL:
@@ -2133,8 +2148,7 @@ index a986e30..3aaea3b 100644
 -					sensor->prop_names.bus_type,
 -					V4L2_FWNODE_BUS_TYPE_CSI2_DPHY);
 +				sensor->prop_names.bus_type,
-+				cfg->cphy ? V4L2_FWNODE_BUS_TYPE_CSI2_CPHY :
-+					    V4L2_FWNODE_BUS_TYPE_CSI2_DPHY);
++				V4L2_FWNODE_BUS_TYPE_CSI2_DPHY);
  	sensor->ep_properties[1] = PROPERTY_ENTRY_U32_ARRAY_LEN(
  					sensor->prop_names.data_lanes,
  					bridge->data_lanes, sensor->lanes);
@@ -2251,6 +2265,9 @@ index fee7e56..b0c8da3 100644
  #include <linux/module.h>
  #include <linux/overflow.h>
 +#include <linux/platform_data/x86/int3472.h>
++
++/* GPIO type 0x08 = DVDD, not yet in upstream int3472.h */
++#define INT3472_GPIO_TYPE_DVDD 0x08
  #include <linux/platform_device.h>
  #include <linux/string_choices.h>
  #include <linux/uuid.h>
