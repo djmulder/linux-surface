@@ -1291,7 +1291,7 @@ new file mode 100644
 +};
 +
 +static const u32 imx681_mbus_codes[] = {
-+	MEDIA_BUS_FMT_SBGGR10_1X10,
++	MEDIA_BUS_FMT_SRGGB10_1X10,
 +};
 +
 +/* Regulator supplies */
@@ -1473,7 +1473,7 @@ new file mode 100644
 +	format = v4l2_subdev_state_get_format(state, IMAGE_PAD);
 +	format->width = IMX681_WIDTH;
 +	format->height = IMX681_HEIGHT;
-+	format->code = MEDIA_BUS_FMT_SBGGR10_1X10;
++	format->code = MEDIA_BUS_FMT_SRGGB10_1X10;
 +	format->field = V4L2_FIELD_NONE;
 +	format->colorspace = V4L2_COLORSPACE_RAW;
 +	format->ycbcr_enc = V4L2_YCBCR_ENC_601;
@@ -1698,26 +1698,34 @@ new file mode 100644
 +{
 +	u64 val;
 +	int ret;
++	int tries;
 +
-+	ret = cci_read(imx681->cci, IMX681_REG_CHIP_ID, &val, NULL);
++	for (tries = 0; tries < 5; tries++) {
++		ret = cci_read(imx681->cci, IMX681_REG_CHIP_ID, &val, NULL);
++		if (ret) {
++			dev_warn(imx681->dev,
++				 "chip ID read failed (attempt %d/5): %d\n",
++				 tries + 1, ret);
++			msleep(100);
++			continue;
++		}
++		if (val == IMX681_CHIP_ID)
++			return 0;
++
++		dev_warn(imx681->dev,
++			 "chip ID 0x%04llx != 0x%04x (attempt %d/5), retrying\n",
++			 val, IMX681_CHIP_ID, tries + 1);
++		msleep(100);
++	}
++
++	/* All retries exhausted */
 +	if (ret) {
-+		dev_err(imx681->dev,
-+			"failed to read chip ID register 0x0016: %d\n", ret);
++		dev_err(imx681->dev, "chip ID read failed after 5 attempts: %d\n", ret);
 +		return ret;
 +	}
-+
-+	if (val != IMX681_CHIP_ID) {
-+		/* If sensor returns 0, it's not powered yet — defer probe */
-+		if (val == 0) {
-+			dev_dbg(imx681->dev, "chip ID 0x0000, sensor not ready, deferring\n");
-+			return -EPROBE_DEFER;
-+		}
-+		dev_err(imx681->dev, "chip ID mismatch: 0x%04llx != 0x%04x\n",
-+			val, IMX681_CHIP_ID);
-+		return -EIO;
-+	}
-+
-+	return 0;
++	dev_err(imx681->dev, "chip ID mismatch after 5 attempts: 0x%04llx != 0x%04x\n",
++		val, IMX681_CHIP_ID);
++	return -EPROBE_DEFER;
 +}
 +
 +static int imx681_init_controls(struct imx681 *imx681)
