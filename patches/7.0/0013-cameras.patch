@@ -1157,7 +1157,7 @@ new file mode 100644
 +/* Analog gain */
 +#define IMX681_REG_ANALOG_GAIN		CCI_REG16(0x0204)
 +#define IMX681_ANA_GAIN_MIN		0
-+#define IMX681_ANA_GAIN_MAX		1020	/* combined analog+digital */
++#define IMX681_ANA_GAIN_MAX		960	/* inverted in set_ctrl: hw=960-logical */
 +#define IMX681_ANA_GAIN_DEFAULT		0
 +
 +/* Digital gain */
@@ -1277,7 +1277,7 @@ new file mode 100644
 +	{ CCI_REG8(0x0104),  0x01 },		/* Group hold ON */
 +	{ CCI_REG24(0x033D), 0x000C69 },	/* Frame length = 3177 */
 +	{ CCI_REG24(0x0229), 0x000C61 },	/* Exposure = 3169 lines */
-+	{ CCI_REG16(0x0204), 0x0060 },		/* Analog gain = 96 */
++	{ CCI_REG16(0x0204), 0x0000 },		/* Analog gain = 0 (hw code 0 = 16x brightest) */
 +	{ CCI_REG16(0x020E), 0x0400 },		/* Digital gain = 4.0x */
 +	{ CCI_REG8(0x0104),  0x00 },		/* Group hold OFF */
 +};
@@ -1372,7 +1372,9 @@ new file mode 100644
 +		 * set analog to max and use digital gain for the rest.
 +		 * Digital gain register: 0x0100 = 1.0x, value = gain * 256.
 +		 */
-+		int ana_code = min(ctrl->val, 960);
++		/* Hardware register is inverted: code 0=16x, code 960=1x.
++		 * Invert so logical 0=1x, logical 960=16x (AGC ramps correctly). */
++		int ana_code = 960 - min(ctrl->val, 960);
 +		int dig_reg = IMX681_DIG_GAIN_MIN; /* 0x0100 = 1.0x */
 +
 +		if (ctrl->val > 960) {
